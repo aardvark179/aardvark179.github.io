@@ -1,58 +1,83 @@
+#+OPTIONS: toc:nil
 * Making special variables less special in TruffleRuby
-Ruby has quite a large set of pre-defined global variables which are
+Ruby has quite a large set of [[http://ruby-doc.org/docs/ruby-doc-bundle/Manual/man-1.4/variable.html#variables][pre-defined global variables]] which are
 special in a variety of ways. Some are read only, some are only
 defined when others are non-nil, some are local to a thread, and two
 are really special. Understanding exactly how they behave is hard
 because you can't normally look in just one place. In MRI for example
 you may be able to find where the variables are defined in the C code,
-but you'll also need to trace through quite a few functions to track
+but you'll also need to trace through many functions to track
 down everything that happens, and you may find there is some special
 code in the parser or compiler that changes that. In TruffleRuby we
 like to implement as much as we can in Ruby, so let's see if we can do
 that here and make it easier for everyone to understand how these
 variables behave.
+
+This sort of thing has been [[https://github.com/0x0dea/viva][done before]] as a fun demo, but not for
+actually implementing Ruby itself, even in implementations that try to
+write as much of their standard library in Ruby as they can.
 ** Hooked variables
 The most important thing we're going to need is a way to define
 variables with custom behaviour from Ruby. There's a function in MRI's
-C API which allows this ~rb_define_hooked_variable~, and quite a few
+C API which allows this, ~rb_define_hooked_variable~, and several
 macros and other variants that use that. Since we support those
 function we already had the capability, but we do need to expose it in
 a nice way. We don't want to add methods to existing classes that
 might cause clashes so we tend to put things like this into modules
 under the ~Truffle~ name space. We are also going to want to define a
 lot of read only variables, so it's probably a good idea to make a
-method for that as well.
+method for that as well. In TruffleRuby you'll find these methods in
+~Truffle::KernelOperations~, but for brevity we'll just put them under
+~Truffle~ here.
 #+BEGIN_SRC ruby
 module Truffle
-  module KernelOperations
-    def self.define_hooked_variable(name, getter, setter, defined = proc { 'global-variable' })
-      # Work is done in here.
-    end
+  def self.define_hooked_variable(name, getter, setter, defined = proc { 'global-variable' })
+    # Work is done in here.
+  end
 
-    def self.define_read_only_global(name, getter)
-      setter = -> _ { raise NameError, "#{name} is a read-only variable." }
-      define_hooked_variable(name, getter, setter)
-    end
+  def self.define_read_only_global(name, getter)
+    setter = -> _ { raise NameError, "#{name} is a read-only variable." }
+    define_hooked_variable(name, getter, setter)
   end
 end
 #+END_SRC
 This method is going to take the name of a variable to be defined,
 procedures for getting and setting the value, and an optional
-procedure to be used for ~defined? $my_variable~. Now we've
-got that let's see if we can define some of the simple cases.
+procedure to be used for ~defined? $my_variable~. If you've never used
+~defined?~ in Ruby it's a little special. It returns the semantic
+meaning of the expression that follows it. Simple expressions will
+just return ~'expression'~, method names will return ~'method'~, and
+so on. If you try ~defined? $var~ then you will get
+~'global-variable'~ if ~$var~ has been assigned to or ~nil~ if it
+hasn't. Some of Ruby's special variables have more complex behaviour
+so we need to be able to provide a procedure for that.
+** Trivial example
+Let's see this in action by defining our own hooked variable.
+#+BEGIN_SRC ruby
+x = nil
+Truffle.define_hooked_variable(
+  :$my_var,
+  -> { x },
+  -> v { puts "Setting $my_var to #{v}.",
+         x = v })
+#+END_SRC
+Now if you try doing ~$my_var = "something"~ you'll see a message
+saying ~Setting $my_var to something.~ You should also be able to get
+back the value you stored by doing ~$my_var~. Now we know this works
+let's see if we can define some of the simple special variables.
 ** Variables related to ARGF
 Several special variables are connected to ~ARGF~, they link to
 properties on that object but can't be written to themselves.
 
 #+BEGIN_SRC ruby
-Truffle::KernelOperations.define_read_only_global(:$<, -> { ARGF } )
-Truffle::KernelOperations.define_read_only_global(:$FILENAME, -> { ARGF.filename } )
+Truffle.define_read_only_global :$<, -> { ARGF }
+Truffle.define_read_only_global :$FILENAME, -> { ARGF.filename }
 #+END_SRC
 
 There's also ~$*~ which holds the arguments not consumed by the Ruby implementation itself.
 
 #+BEGIN_SRC ruby
-Truffle::KernelOperations.define_read_only_global(:$*, -> { ARGV })
+Truffle.define_read_only_global :$*, -> { ARGV }
 #+END_SRC
 
 Finally we'll look at ~$.~. This is set by various methods on ~ARGF~
@@ -61,7 +86,7 @@ it doesn't actually change that value. Instead we hold it on another
 instance variable on ~ARGF~ like this:
 
 #+BEGIN_SRC ruby
-Truffle::KernelOperations.define_hooked_variable(
+Truffle.define_hooked_variable(
   :$.,
   -> { ARGF.instance_variable_get(:@last_lineno) },
   -> value { value = Truffle::Type.coerce_to value, Fixnum, :to_int
@@ -69,20 +94,20 @@ Truffle::KernelOperations.define_hooked_variable(
 #+END_SRC
 
 ** Other simple cases
-Quite a few variables allow writes to them, but put include some extra
-checks. We could create these as lambdas that capture a variable, but
-since the parts of the runtime that aren't written in Ruby also need
-access to these it helps if they are stored in the global variable
-itself. We'll define ~Truffle::KernelOperations.global_variable_get~
-and ~global_variable_set~ to do that for us, and then write lambdas
-that use them like this:
+Quite a few variables allow writes to them, but include some extra
+checks. At first glance, it appears we could simply represent these
+constraints with a lambda. While this is a nice, clear solution in
+Ruby, it unfortunately complicates parts of the TruffleRuby runtime
+written in Java. To help keep things simple for both the Ruby and Java
+parts of the runtime, we've added ~Truffle.global_variable_get~ and
+~Truffle.global_variable_set~. and we can then use them like this:
 
 #+BEGIN_SRC ruby
-Truffle::KernelOperations.define_hooked_variable(
+Truffle.define_hooked_variable(
   :$stdout,
-  -> { Truffle::KernelOperations.global_variable_get(:$stdout) },
+  -> { Truffle.global_variable_get(:$stdout) },
   -> v { raise TypeError, "$stdout must have a write method #{v.class} given." unless v.respond_to?(:write)
-         Truffle::KernelOperations.global_variable_set(:$stdout, v) })
+         Truffle.global_variable_set(:$stdout, v) })
 
 alias $> $stdout
 #+END_SRC
@@ -99,19 +124,19 @@ about what will optimise now.
 *** A normal global
 What happens when we run a simple statement like ~$foo~ in
 TruffleRuby? Well, that statement gets parsed into an AST (an Abstract
-Syntax Tree), and in this case it will consist of only one important
-node a ~ReadGlobalVariableNode~. When it is run it will look up the
-storage for that variable, and return the result. If it were part of a
-lambda such as ~-> { $foo }~ then it would only lookup the variable
-once, subsequent executions would just return the value from the
-storage. That's pretty fast, right?
+Syntax Tree). In this case the only node we need to think about in the
+tree is a ~ReadGlobalVariableNode~. When it is run it will look up the
+storage for that variable and return the result. If it were used
+inside a loop then it would only lookup the variable storage the first
+time it was executed; subsequent executions would just return the
+value from the storage. That should be retty fast, right?
 *** Optimising for constant values
 Most global variables won't change their value, and we'd like be able
-to assume those values really are constant if we can, so the storage
+to assume those values really are constant if we can. So the storage
 for each global includes a couple of extra bits of information. We
 keep track of the number of times a global has had its value changed,
-and we keep an Assumption (with a capital A) to represent the value
-being constant. When code is compiled with a just in time compiler
+and we keep an ~Assumption~ to represent the value being
+constant. When code is compiled with a JIT (just in time) compiler
 assumptions are often used to track speculative optimisations, and
 marking an assumption as invalidated will cause the JIT to invalidate
 the compiled code. So, how do we use this for global variables?
@@ -131,18 +156,19 @@ actually has two specialisations which can be used.
     }
 #+END_SRC
 What this says is that if the assumption is true then we can cache the
-value of the global, and return that. The JIT understands that the
-cached value is constant, so can use that when making other
-optimisations. If the assumption is invalidated then we'll fall back
-to getting the value from storage every time.
+value of the global, and return constant value without reading it from
+storage every time. The JIT understands that the cached value is
+constant, so can exploit that fact when making other optimisations. If
+the variable is written to then that `Assumption` will be invalidated
+and we'll fall back to getting the value from storage every time.
 *** But what about those hooked variables we just defined?
-Well, once again ~ReadGlobalVariableNode~ is slightly more complex
+Once again ~ReadGlobalVariableNode~ is slightly more complex
 than I let on. It also has cases for global variables with hooked
 storage. It's not too bad though, because the hooks for a variable
 must be constant, so we only really need to worry about how fast those
 lambdas will run. Let's consider the lambda we defined
 #+BEGIN_SRC ruby
--> { Truffle::KernelOperations.global_variable_get(:$stdout) }
+-> { Truffle.global_variable_get :$stdout }
 #+END_SRC
 The ~global_variable_get~ method is defined in our Java runtime, and
 it has two specialisations. Let's take a look at the first one.
@@ -156,37 +182,35 @@ it has two specialisations. Let's take a look at the first one.
 #+END_SRC
 The first time the method is called we'll keep a reference to the name
 of the variable we wanted to get, and we'll create a node to read the
-value - it's a simple version of the node for reading globals because
-it doesn't care about any hooks. So as long as the symbol stays
-constant all it will do is execute the read node. As long as the stored
-value remains constant the read node will just return the cached
-value, and the JIT can optimise away all the apparent extra work.
+value \mdash it's a simple version of the node for reading globals that
+doesn't care about any hooks. So as long as the symbol stays constant
+all it will do is execute the read node. As long as the stored value
+remains constant the read node will just return the cached value, and
+the JIT can optimise away all the apparent extra work.
 *** Not so constant
 All that would be great if we only had that single lambda that did
 #+BEGIN_SRC ruby
--> { Truffle::KernelOperations.global_variable_get(:$stdout) }
+-> { Truffle.global_variable_get :$stdout }
 #+END_SRC
 but we've also got
 #+BEGIN_SRC ruby
--> { Truffle::KernelOperations.global_variable_get(:$stderr) }
+-> { Truffle.global_variable_get :$stderr }
 #+END_SRC
 and many others, so that symbol won't be constant any more, will it?
-Well, luckily we have another tool we can use to help with that
-problem, we can use a fresh copy of the ~global_variable_get~ method
+Luckily we have another tool we can use to help with that
+problem: we can use a fresh copy of the ~global_variable_get~ method
 everywhere it is used in the source. As long as the symbol is constant
-at each of these call sites things should still work nicely. Methods
-we implement in Java will be split automatically, but we can provide a
-hint that others should be as well.
+at each of these call sites things should still work nicely.
 ** There's special, and then there's special
 Next up the difficulty ladder are variables which are local to a
 thread. To implement ~$SAFE~ we'll need a way to return the value for
 the current thread when it is read and written, as well as checking
 any new value is valid. This value must not be visible in the normal
-fibre local variables accessed using ~Thread#[]~ or the thread locals
+fiber local variables accessed using ~Thread#[]~ or the thread locals
 accessed from ~Thread#thread_variable_get~, so we'll need something on
 ~Truffle::ThreadOperations~ to do that job.
 #+BEGIN_SRC ruby
-Truffle::KernelOperations.define_hooked_variable(
+Truffle.define_hooked_variable(
   :$SAFE,
   -> { Truffle::ThreadOperations.get_thread_local(:$SAFE) },
   -> value { value = Truffle::Type.check_safe_level(value)
@@ -210,12 +234,13 @@ valid name for an instance variable in Ruby.
 
 Everything here can be optimised in the same way I described
 above. Accessing instance variables is extremely fast as long as the
-owning object always has the same set, and so as long as the key stays
-constant it will just be a field access in an object. ~Thread.current~
-will be constant if you only use a single thread, and getting the
-thread locals is just like getting an instance variable, In reality
-you'll probably be using more than one thread, but it should still
-optimise well if the method is copied for each call site.
+owning object always has the same set of variables, and so as long as
+the key stays constant it will just be a field access in an
+object. ~Thread.current~ will be constant if you only use a single
+thread, and getting the thread locals is just like getting an instance
+variable. In reality you'll probably be using more than one thread,
+but it should still optimise well if the method is copied for each
+call site.
 
 There's only a few other thread local variables, ~$!~ which holds the
 last raised exception, ~$?~ which holds the return code of the last
@@ -228,8 +253,16 @@ last regular expression match done in a variety of ways, and hence is
 thread local. But more than that it is also frame local. What do I
 mean by that? Well, try this code in ~irb~ and see what you get.
 #+BEGIN_SRC ruby
-def a(str); /foo/ =~ str; $~; end
-def b(str);a(str); $~; end
+def a(str)
+  /foo/ =~ str
+  $~
+end
+
+def b(str)
+  a(str)
+  $~
+end
+
 a("There is a foo in this string")
 b("There is a foo in this string")
 #+END_SRC
@@ -248,7 +281,7 @@ represent a frame in Ruby, ~Binding~!
 module Truffle
   module RegexpOperations
     def self.last_match(a_binding)
-      Truffle::KernelOperations.frame_local_variable_get(:$~, a_binding)
+      Truffle.frame_local_variable_get(:$~, a_binding)
     end
   end
 end
@@ -256,15 +289,15 @@ end
 ~frame_local_variable_get~ will access a hidden local variable in the
 binding, and then pull out the thread local value stored in
 there. That thread local storage is implemented in Java, and optimised
-for the common case that it will only hold a value for one thread, but
-maybe we'll rewrite it in Ruby later. The same kind of specialisations
-we're described above hold true however for all these parts.
+for the common case that it will only hold a value for one
+thread.. The same kind of specialisations we're described above hold
+true however for all these parts.
 
-The variable we want (~$~~) is constant, and as long as ~a_binding~
-has a constant shape then it's really just like getting an instance
-variable, so the hard part is going to be ensuring that ~a_binding~ is
-constant. How can we arrange that, and how can we pass a binding into
-a variable hook?
+The variable we want (~$~~) is constant, accessing a variable in
+~a_binding~ can be optimized just like access to an instance variable
+on an object, so the hard part is going to be ensuring that
+~a_binding~ always come from the same method or block. How can we
+arrange that, and how can we pass a binding into a variable hook?
 
 Well, we'll change how we handle variable hooks a
 little. ~ReadGlobalVariableNode~ actually has two specialisations for
@@ -276,16 +309,16 @@ split the hooks for each call site if they take a binding.
 *** Defining ~$~~ and setting the last match
 With that in place ~$~~ can simply be defined as
 #+BEGIN_SRC ruby
-Truffle::KernelOperations.define_hooked_variable(
+Truffle.define_hooked_variable(
   :$~,
   -> b { Truffle::RegexpOperations.last_match(b) },
   -> v, b { Truffle::RegexpOperations.set_last_match(v, b) })
 #+END_SRC
-Obviously the core library will need to set ~$~~ in callers, and it
-can do this with ~set_last_match~. It needs to get the caller's
-binding but we already have a mechanism to do that (it's how we
-implement ~Kernel#binding~, and it needs to optimise so we spot when
-it is happening and automatically mark methods to be split.
+The core library will need to set ~$~~ in callers, and it can do this
+with ~set_last_match~. It needs to get the caller's binding but we
+already have a mechanism to do that (it's how we implement
+~Kernel#binding~) and it needs to optimise so we spot when it is
+happening and automatically mark methods to be split.
 *** The other regexp variables
 Most of the other variables connected with regular expressions are
 fairly simple. If the last match is not set then they will be ~nil~,
@@ -293,7 +326,7 @@ and are not defined if you do ~defined? $var~. Luckily this is quite
 easy to represent using our ~define_hooked_variable~ method. For
 example ~$&~ is simply.
 #+BEGIN_SRC ruby
-Truffle::KernelOperations.define_hooked_variable(
+Truffle.define_hooked_variable(
   :$&,
   -> b { match = Truffle::RegexpOperations.last_match(b)
          match[0] if match },
@@ -301,17 +334,77 @@ Truffle::KernelOperations.define_hooked_variable(
   -> b { 'global-variable' if Truffle::RegexpOperations.last_match(b) })
 #+END_SRC
 Notice that we raise a ~SyntaxError~ when trying to set this variable
-rather than the ~NameError~ other variables raise? It's just one of
+rather than the ~NameError~ other variables raise. It's just one of
 the things that makes these variables extra special!
+** Testing performance
+Let's check global variable reads and hooked variable reads are still
+good and fast. If you're wondering why I'm not testing writes it's
+because they must introduce a full memory fence so the result can be
+seen by other threads (see the [[https://docs.google.com/document/d/1pVzU8w_QF44YzUCCab990Q_WZOdhpKolCIHaiXG-sPw/edit#heading=h.bkpwfrblzkh][global variables section in the
+proposed Ruby memory model]] for details), and that really
+dominates. Let's try a simple benchmark like
+#+BEGIN_SRC ruby
+$var = 1
+def simple_count
+  total = 0
+  10000.times do
+    total += $var
+  end
+  total
+end
+#+END_SRC
+We'll run the benchmark on MRI, JRuby, and TruffleRubby, and we'll
+also run it on TruffleRuby with ~$var~ defined as a hooked
+variable. We do see some noise in these benchmarks and it take a few
+seconds for TruffleRuby and JRuby's JITs to kick in, so I allow the
+benchmarks to run for a few seconds and then took the average
+iterations per second of this peak performance. All numbers have been
+rounded to two siginificant figures.
+| Implementation       |     IPS |
+|----------------------+---------|
+| MRI                  |    2100 |
+| JRuby                |    2400 |
+| TruffleRuby (normal) | 3400000 |
+| TruffleRuby (hooked) | 3400000 |
+What does this really tell us? Well, it tells us that we've worked out
+~$var~ is constant and we can still successfully do that when it's a
+hooked variable, and maybe that has allowed the JIT to get really
+aggressive with our test. Let's try making ~$var~ less constant and
+see what happens.
+#+BEGIN_SRC ruby
+$r = Random.new
+
+def simple_count
+  $var = $r.rand(8)
+  total = 0
+  10000.times do
+    total += $var
+  end
+  total
+end
+#+END_SRC
+| Implementation       |   IPS |
+|----------------------+-------|
+| MRI                  |  2100 |
+| JRuby                |  2400 |
+| TruffleRuby (normal) | 68000 |
+| TruffleRuby (hooked) | 19000 |
+So we ar seeing some slowdown, but we're still faster than other
+implementations. The slowdown we see is quite sensitive to the precise
+benchmark design. Some showed very little slowdown while this case has
+is 3 times slower with hooked variables.
 ** What's left?
 After this work there's only two special bits of variable support left
-in our parser. We still look for ~$1...9~ for accessing captured group
-in ~$~~. They would be trivial to implement in Ruby, but how many
-should be defined? If we want to be exactly like MRI then there should
-be as many as there are capture groups in a the regexp last match, but
-only the first nine will be listed by ~Kernel#global_variables~. We
-might be able to make the special case smaller, but we probably can't
-get rid of it entirely.
+in our parser. We still look for ~$1...$N~ for accessing captured
+group in ~$~~. They would be trivial to implement in Ruby, but how
+high is N? If we want to be exactly like MRI then there should be as
+many variables as there are capture groups in a the regexp last match,
+but only the first nine will be listed by
+~Kernel#global_variables~. We might handle this by introducing a
+~variable_missing~ method that would be called if the global variable
+storage has not already been declared, this could then create hooked
+variables for captured group variables and normal storage for anything
+else.
 
 The other special handling we still have is for named captures. If you
 use ~=~~ on a regexp literal, and it has named capture groups, then
@@ -319,7 +412,13 @@ the equivalently named local variables will be set to the capture
 groups. We could write most of that in Ruby, but we'd still need to
 check for named captures in the parser, and making sure it optimised
 well would probably require some extra work that we haven't done yet.
+
+Since we saw some slow down from hooked variables in performance
+testing we may want to look more deeply into that and see if it can be
+reduced or eliminated, and we migth look at rewriting the storage for
+~$~~ in Ruby as well.
 ** Conclusion
-You can implement pretty much all of Ruby's special variables in Ruby,
-and they can be optimised by TruffleRuby to be as fast as the parts of
-the runtime they replaced, and will be 
+TruffleRuby lets us implement more of Ruby in Ruby itself while still
+allowing aggressive optimisation to be done. This can help make our
+runtime smaller and hopefully make it easier for the community to
+understand and contribute to our implementation.
