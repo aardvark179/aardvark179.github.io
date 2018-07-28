@@ -1,0 +1,127 @@
+#+TITLE: Lightweight fibres for TruffleRuby.
+#+DATE: 2018-07-30 Mon
+The MRI Ruby implementation supports heavy weight threads which are
+pre-emptively scheduled, and lightweight fibres which may run on those
+threads and are co-operatively scheduled. Fibres have been a problem
+for JVM Ruby implementations because the VM itself did not have a
+concept of a fibre, or a lightweight abstraction we could build upon,
+but that's starting to change with [[http://openjdk.java.net/projects/loom/][Project loom]], let's take a look at
+what it gives, and how we can use that to implement fibres that can
+scale beyond even MRI's.
+* Disclaimer
+Everything I"m talking about here is based on early prototypes. The
+APIs and features may change radically before anything nears being
+production, and there is no fixed timetable for when these feature
+will arrive in a production JVM except, "When it's done."
+* Lightweight threads, continuations, and Project Loom.
+Project Loom is an OpenJDK project with the goal
+#+BEGIN_QUOTE
+To explore and incubate Java VM features and APIs built on top of them
+for the implementation of lightweight user-mode threads (fibers),
+delimited continuations (of some form), and related features, such as
+explicit tail-call.
+#+END_QUOTE
+That may sound complex, but let's look at it bit by bit and see what
+it gives us in Java, and how we can use that in TruffleRuby.
+** Lightweight user mode threads
+These are currently called ~java.lang.Fiber~ in the project loom
+prototype, and they provide a nice simple model. Fibres are started
+with a scheduler, and whenever the has nothing to do it parks
+itself. When the scheduler decided that that fibre has more work it
+can do then it will schedule it next. The scheduler isn't special,
+it's a standard ~java.util.concurrent.Executor~ and it can use
+whatever scheduling strategy it likes, across as many threads as it
+likes. If your fibres are mostly doing IO, or waiting for locks then
+you probably won't even have to park them explicitly as the Java class
+library will do that for you.
+** Continuations
+Continuations are a lower level concept upon which those lightweight
+threads are built. A continuation can be run, and can yield control
+back to the function which ran it. If it is run again then it will
+continue from the point at which it yielded with the same call stack,
+local variables, and so forth.
+** What makes these features more light weight than =java.lang.Thread=?
+A normal =java.lang.Thread= in Hotspot is a normal operating system
+thread, it has a stack, and will be scheduled by the operating system,
+and in the JVM it will include data structures for things like thread
+local variables. Scheduling threads is heavyweight because it has to
+happen via kernel space and because the kernel only has a very limited
+idea of which thread it would be sensible to schedule
+next. Lightweight user mode threads and continuations can involve much
+less data since we only need to preserve part of the stack, and can
+often be very effectively scheduled since the application may often
+know precisely what to run next.
+* Fibres and continuations in Ruby
+Ruby has its own model of fibres and continuations, and they aren't
+quite the same as Loom's
+** Fibres
+Ruby has the =Fiber= class. You create a =Fiber= with a block like this
+#+BEGIN_SRC ruby
+f = Fiber.new do |x|
+  puts "Fiber called with #{x}"
+end
+#+END_SRC
+and call it lie this
+#+BEGIN_SRC ruby
+f.resume(1)
+#+END_SRC
+which should produce ~Fiber called with 1~ as output. Fibres can
+explicitly transfer control to another fibre, or yield to the fibre
+which transferred control to them.
+** Continuations
+Continuations in Ruby are created using the =Kernel#callcc=
+method. This takes a block which will be executed immediately, and
+create a continuation object which when called will resume execution
+from the end of the block. They are quite hard to get your head round,
+so an example is probably helpful. I've adapted this one from the Ruby
+documentation on continuations.
+#+BEGIN_SRC ruby
+require "continuation"
+def f
+  arr = [ "Freddie", "Herbie", "Ron", "Max", "Ringo" ]
+  cont = nil
+  callcc do |cc| 
+    puts 'Creating continuation'
+    cont = cc
+  end
+  puts(message = arr.shift)
+  cont.call unless message =~ /Max/
+end
+#+END_SRC
+If you run this Ruby method it will output the following
+: Creating continuation
+: Freddie
+: Herbie
+: Ron
+: Max
+What's going on here? Well the method creates an array =arr=, and a
+variable =cont=. It then calls =callcc= which executes the block,
+passing in the continuation object as an argument. The block prints
+out that we're creating a continuation, and assigns it to =cont= so we
+can use it later. We then remove the first element of =arr= and assign
+it to =message= and output it. Finally we call the continuation again
+unless =message= matches "Max", and this causes the latter half of the
+method to be run again.
+
+There's quite a lot of debate over whether continuations like this are
+a good idea, and they certainly aren't widely used in production code,
+but they are still part of the standard Ruby implementation and we do
+support them in TruffleRuby.
+* The differences between these two models
+As you can see these models differ in a couple of important ways.
+
+In the case of fibres Loom places the responsibility for scheduling on
+an object outside of the fibres themselves, while Ruby allows each
+fibre to either explicitly transfer control to another or yield to
+whichever fibre transferred control to it.
+
+Continuations are even more marked in their differences. Loom's behave
+in many ways more like Ruby's fibres, with each call and yield
+advancing the execution state.
+* Implementing Ruby's model using Loom's
+So given the quite different nature of these two models can we
+implement Ruby's fibres and continuations using what Loom provides?
+** Implementing Ruby fibres
+*** With Loom's Fibres
+*** With Loom's Continuations
+** Implementing =callcc=
