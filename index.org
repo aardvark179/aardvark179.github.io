@@ -1,0 +1,3 @@
+#+TITLE: Aardvark179's personal site
+Nothing much here, but look in the blog for stuff about implementing TruffleRuby.
+- [[./blog/special_variables.org][Making special variables less special in TruffleRuby]]
