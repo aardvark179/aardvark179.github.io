@@ -1,0 +1,3 @@
+#+TITLE: About me
+I implement programming languages for a living. I currently work for
+Oracle Labs VM Research Group on TruffleRuby.
