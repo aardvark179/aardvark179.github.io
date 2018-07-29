@@ -50,30 +50,30 @@
 <h2>Table of Contents</h2>
 <div id="text-table-of-contents">
 <ul>
-<li><a href="#org673c909">1. Disclaimer</a></li>
-<li><a href="#org587d791">2. Lightweight threads, continuations, and Project Loom.</a>
+<li><a href="#org8e34b69">1. Disclaimer</a></li>
+<li><a href="#org1655766">2. Lightweight threads, continuations, and Project Loom.</a>
 <ul>
-<li><a href="#orge8c33cc">2.1. Lightweight user mode threads</a></li>
-<li><a href="#orgfa39bc1">2.2. Continuations</a></li>
-<li><a href="#org1e8348d">2.3. What makes these features more light weight than <code>java.lang.Thread</code>?</a></li>
+<li><a href="#org7cb9ad6">2.1. Lightweight user mode threads</a></li>
+<li><a href="#org72cb1c6">2.2. Continuations</a></li>
+<li><a href="#orga45e7a9">2.3. What makes these features more light weight than <code>java.lang.Thread</code>?</a></li>
 </ul>
 </li>
-<li><a href="#org07411c4">3. Fibres and continuations in Ruby</a>
+<li><a href="#org48ac624">3. Fibres and continuations in Ruby</a>
 <ul>
-<li><a href="#org826cd38">3.1. Fibres</a></li>
-<li><a href="#orgf7b5d81">3.2. Continuations</a></li>
+<li><a href="#orgb515159">3.1. Fibres</a></li>
+<li><a href="#orge8e18c5">3.2. Continuations</a></li>
 </ul>
 </li>
-<li><a href="#org169dfeb">4. The differences between these two models</a></li>
-<li><a href="#org4242bb3">5. Implementing Ruby's model using Loom's</a>
+<li><a href="#org174210b">4. The differences between these two models</a></li>
+<li><a href="#orgb929868">5. Implementing Ruby's model using Loom's</a>
 <ul>
-<li><a href="#orge8ecf97">5.1. Implementing fibres</a>
+<li><a href="#orgdacbf15">5.1. Implementing Ruby fibres</a>
 <ul>
-<li><a href="#org2044498">5.1.1. With Loom's Fibres</a></li>
-<li><a href="#org275a61c">5.1.2. With Loom's Continuations</a></li>
+<li><a href="#orgbf4e10e">5.1.1. With Loom's Fibres</a></li>
+<li><a href="#org5307bf1">5.1.2. With Loom's Continuations</a></li>
 </ul>
 </li>
-<li><a href="#orgad6ca73">5.2. Implementing <code>callcc</code></a></li>
+<li><a href="#org75e7447">5.2. Implementing <code>callcc</code></a></li>
 </ul>
 </li>
 </ul>
@@ -89,8 +89,8 @@ but that's starting to change with <a href="http://openjdk.java.net/projects/loo
 what it gives, and how we can use that to implement fibres that can
 scale beyond even MRI's.
 </p>
-<div id="outline-container-org673c909" class="outline-2">
-<h2 id="org673c909"><span class="section-number-2">1</span> Disclaimer</h2>
+<div id="outline-container-org8e34b69" class="outline-2">
+<h2 id="org8e34b69"><span class="section-number-2">1</span> Disclaimer</h2>
 <div class="outline-text-2" id="text-1">
 <p>
 Everything I"m talking about here is based on early prototypes. The
@@ -100,8 +100,8 @@ will arrive in a production JVM except, "When it's done."
 </p>
 </div>
 </div>
-<div id="outline-container-org587d791" class="outline-2">
-<h2 id="org587d791"><span class="section-number-2">2</span> Lightweight threads, continuations, and Project Loom.</h2>
+<div id="outline-container-org1655766" class="outline-2">
+<h2 id="org1655766"><span class="section-number-2">2</span> Lightweight threads, continuations, and Project Loom.</h2>
 <div class="outline-text-2" id="text-2">
 <p>
 Project Loom is an OpenJDK project with the goal
@@ -119,8 +119,8 @@ That may sound complex, but let's look at it bit by bit and see what
 it gives us in Java, and how we can use that in TruffleRuby.
 </p>
 </div>
-<div id="outline-container-orge8c33cc" class="outline-3">
-<h3 id="orge8c33cc"><span class="section-number-3">2.1</span> Lightweight user mode threads</h3>
+<div id="outline-container-org7cb9ad6" class="outline-3">
+<h3 id="org7cb9ad6"><span class="section-number-3">2.1</span> Lightweight user mode threads</h3>
 <div class="outline-text-3" id="text-2-1">
 <p>
 These are currently called <code>java.lang.Fiber</code> in the project loom
@@ -136,20 +136,20 @@ library will do that for you.
 </p>
 </div>
 </div>
-<div id="outline-container-orgfa39bc1" class="outline-3">
-<h3 id="orgfa39bc1"><span class="section-number-3">2.2</span> Continuations</h3>
+<div id="outline-container-org72cb1c6" class="outline-3">
+<h3 id="org72cb1c6"><span class="section-number-3">2.2</span> Continuations</h3>
 <div class="outline-text-3" id="text-2-2">
 <p>
 Continuations are a lower level concept upon which those lightweight
 threads are built. A continuation can be run, and can yield control
 back to the function which ran it. If it is run again then it will
-continue from the point at which it yielded with roughly the same call
-stack, local variables, and so forth.
+continue from the point at which it yielded with the same call stack,
+local variables, and so forth.
 </p>
 </div>
 </div>
-<div id="outline-container-org1e8348d" class="outline-3">
-<h3 id="org1e8348d"><span class="section-number-3">2.3</span> What makes these features more light weight than <code>java.lang.Thread</code>?</h3>
+<div id="outline-container-orga45e7a9" class="outline-3">
+<h3 id="orga45e7a9"><span class="section-number-3">2.3</span> What makes these features more light weight than <code>java.lang.Thread</code>?</h3>
 <div class="outline-text-3" id="text-2-3">
 <p>
 A normal <code>java.lang.Thread</code> in Hotspot is a normal operating system
@@ -166,16 +166,16 @@ know precisely what to run next.
 </div>
 </div>
 </div>
-<div id="outline-container-org07411c4" class="outline-2">
-<h2 id="org07411c4"><span class="section-number-2">3</span> Fibres and continuations in Ruby</h2>
+<div id="outline-container-org48ac624" class="outline-2">
+<h2 id="org48ac624"><span class="section-number-2">3</span> Fibres and continuations in Ruby</h2>
 <div class="outline-text-2" id="text-3">
 <p>
 Ruby has its own model of fibres and continuations, and they aren't
 quite the same as Loom's
 </p>
 </div>
-<div id="outline-container-org826cd38" class="outline-3">
-<h3 id="org826cd38"><span class="section-number-3">3.1</span> Fibres</h3>
+<div id="outline-container-orgb515159" class="outline-3">
+<h3 id="orgb515159"><span class="section-number-3">3.1</span> Fibres</h3>
 <div class="outline-text-3" id="text-3-1">
 <p>
 Ruby has the <code>Fiber</code> class. You create a <code>Fiber</code> with a block like this
@@ -200,8 +200,8 @@ which transferred control to them.
 </p>
 </div>
 </div>
-<div id="outline-container-orgf7b5d81" class="outline-3">
-<h3 id="orgf7b5d81"><span class="section-number-3">3.2</span> Continuations</h3>
+<div id="outline-container-orge8e18c5" class="outline-3">
+<h3 id="orge8e18c5"><span class="section-number-3">3.2</span> Continuations</h3>
 <div class="outline-text-3" id="text-3-2">
 <p>
 Continuations in Ruby are created using the <code>Kernel#callcc</code>
@@ -256,26 +256,48 @@ support them in TruffleRuby.
 </div>
 </div>
 </div>
-<div id="outline-container-org169dfeb" class="outline-2">
-<h2 id="org169dfeb"><span class="section-number-2">4</span> The differences between these two models</h2>
+<div id="outline-container-org174210b" class="outline-2">
+<h2 id="org174210b"><span class="section-number-2">4</span> The differences between these two models</h2>
+<div class="outline-text-2" id="text-4">
+<p>
+As you can see these models differ in a couple of important ways.
+</p>
+
+<p>
+In the case of fibres Loom places the responsibility for scheduling on
+an object outside of the fibres themselves, while Ruby allows each
+fibre to either explicitly transfer control to another or yield to
+whichever fibre transferred control to it.
+</p>
+
+<p>
+Continuations are even more marked in their differences. Loom's behave
+in many ways more like Ruby's fibres, with each call and yield
+advancing the execution state.
+</p>
 </div>
-<div id="outline-container-org4242bb3" class="outline-2">
-<h2 id="org4242bb3"><span class="section-number-2">5</span> Implementing Ruby's model using Loom's</h2>
+</div>
+<div id="outline-container-orgb929868" class="outline-2">
+<h2 id="orgb929868"><span class="section-number-2">5</span> Implementing Ruby's model using Loom's</h2>
 <div class="outline-text-2" id="text-5">
+<p>
+So given the quite different nature of these two models can we
+implement Ruby's fibres and continuations using what Loom provides?
+</p>
 </div>
-<div id="outline-container-orge8ecf97" class="outline-3">
-<h3 id="orge8ecf97"><span class="section-number-3">5.1</span> Implementing fibres</h3>
+<div id="outline-container-orgdacbf15" class="outline-3">
+<h3 id="orgdacbf15"><span class="section-number-3">5.1</span> Implementing Ruby fibres</h3>
 <div class="outline-text-3" id="text-5-1">
 </div>
-<div id="outline-container-org2044498" class="outline-4">
-<h4 id="org2044498"><span class="section-number-4">5.1.1</span> With Loom's Fibres</h4>
+<div id="outline-container-orgbf4e10e" class="outline-4">
+<h4 id="orgbf4e10e"><span class="section-number-4">5.1.1</span> With Loom's Fibres</h4>
 </div>
-<div id="outline-container-org275a61c" class="outline-4">
-<h4 id="org275a61c"><span class="section-number-4">5.1.2</span> With Loom's Continuations</h4>
+<div id="outline-container-org5307bf1" class="outline-4">
+<h4 id="org5307bf1"><span class="section-number-4">5.1.2</span> With Loom's Continuations</h4>
 </div>
 </div>
-<div id="outline-container-orgad6ca73" class="outline-3">
-<h3 id="orgad6ca73"><span class="section-number-3">5.2</span> Implementing <code>callcc</code></h3>
+<div id="outline-container-org75e7447" class="outline-3">
+<h3 id="org75e7447"><span class="section-number-3">5.2</span> Implementing <code>callcc</code></h3>
 </div>
 </div>
 
