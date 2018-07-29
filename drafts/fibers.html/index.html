@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="en-us">
+<head>
+  <title>Lightweight fibres for TruffleRuby. - aardvark179.github.io</title>
+  <meta charset="utf-8" />
+  <meta name="author" content="" />
+
+  <link rel="alternate" title="RSS Feed" href="/rss.xml" type="application/rss+xml">
+  <link rel="stylesheet" href="/media/css/main.css" type="text/css">
+  <link rel="stylesheet" href="/media/css/posts.css" type="text/css">
+
+  <script src="https://ajax.googleapis.com/ajax/libs/jquery/1.11.0/jquery.min.js"></script>
+  <script src="http://netdna.bootstrapcdn.com/bootstrap/3.1.1/js/bootstrap.min.js"></script>
+</head>
+
+  <body class="container">
+<header id="header">
+    <body>
+        <nav class="navbar navbar-default navbar-fixed-top" style="opacity: .9" role="navigation">
+            <div class="container-fluid">
+                <div class="navbar-header">
+                    <button type="button" class="navbar-toggle" data-toggle="collapse" data-target="#bs-example-navbar-collapse-1">
+                        <span class="sr-only">Toggle navigation</span>
+                        <span class="icon-bar"></span>
+                        <span class="icon-bar"></span>
+                        <span class="icon-bar"></span>
+                    </button>
+                    <a class="navbar-brand" href="/">aardvark179.github.io</a>
+                </div>
+                <div class="collapse navbar-collapse" id="bs-example-navbar-collapse-1">
+                    <ul class="nav navbar-nav navbar-right">
+                            <li class="active"><a href="/blog/">Blog</a></li>
+                            <li class="active"><a href="/drafts/">Drafts</a></li>
+                        <li><a href="/tags/">Tags</a></li>
+                        <li><a href="/about/">About</a></li>
+                        <li><a href="https://github.com/aardvark179">GitHub</a></li>
+                        <li><a href="/rss.xml">RSS</a></li>
+                    </ul>
+                </div>
+            </div>
+        </nav>
+    </body>
+</header>
+
+<section id="content" role="main">
+    <div id="outline-container-sec-" class="row" style="padding-top: 70px">
+        <div class="col-md-2"></div>
+            <h1>Lightweight fibres for TruffleRuby.</h1>
+            <div id="table-of-contents">
+<h2>Table of Contents</h2>
+<div id="text-table-of-contents">
+<ul>
+<li><a href="#org6fb4f55">1. Disclaimer</a></li>
+<li><a href="#org37b749b">2. Lightweight threads, continuations, and Project Loom.</a>
+<ul>
+<li><a href="#org21e8045">2.1. Lightweight user mode threads</a></li>
+<li><a href="#orgf16c09c">2.2. Continuations</a></li>
+</ul>
+</li>
+</ul>
+</div>
+</div>
+<p>
+The MRI Ruby implementation supports heavy weight threads which are
+pre-emptively scheduled, and lightweight fibres which may run on those
+threads and are co-operatively scheduled. Fibres have been a problem
+for JVM Ruby implementations because the VM itself did not have a
+concept of a fibre, or a lightweight abstraction we could build upon,
+but that's starting to change with <a href="http://openjdk.java.net/projects/loom/">Project loom</a>, let's take a look at
+what it gives, and how we can use that to implement fibres that can
+scale beyond even MRI's.
+</p>
+<div id="outline-container-org6fb4f55" class="outline-2">
+<h2 id="org6fb4f55"><span class="section-number-2">1</span> Disclaimer</h2>
+<div class="outline-text-2" id="text-1">
+<p>
+Everything I"m talking about here is based on early prototypes. The
+APIs and features may change radically before anything nears being
+production, and there is no fixed timetable for when these feature
+will arrive in a production JVM except, "When it's done."
+</p>
+</div>
+</div>
+<div id="outline-container-org37b749b" class="outline-2">
+<h2 id="org37b749b"><span class="section-number-2">2</span> Lightweight threads, continuations, and Project Loom.</h2>
+<div class="outline-text-2" id="text-2">
+<p>
+Project Loom is an OpenJDK project with the goal
+</p>
+<blockquote>
+<p>
+To explore and incubate Java VM features and APIs built on top of them
+for the implementation of lightweight user-mode threads (fibers),
+delimited continuations (of some form), and related features, such as
+explicit tail-call.
+</p>
+</blockquote>
+<p>
+That may sound complex, but let's look at it bit by bit and see what
+it gives us in Java, and how we can use that in TruffleRuby.
+</p>
+</div>
+<div id="outline-container-org21e8045" class="outline-3">
+<h3 id="org21e8045"><span class="section-number-3">2.1</span> Lightweight user mode threads</h3>
+<div class="outline-text-3" id="text-2-1">
+<p>
+These are currently called <code>java.lang.Fiber</code> in the project loom
+prototype, and they provide a nice simple model. Fibres are started
+with a scheduler, and whenever the has nothing to do it parks
+itself. When the scheduler decided that that fibre has more work it
+can do then it will schedule it next. The scheduler isn't special,
+it's a standard <code>java.util.concurrent.Executor</code> and it can use
+whatever scheduling strategy it likes, across as many threads as it
+likes. If your fibres are mostly doing IO, or waiting for locks then
+you probably won't even have to park them explicitly as the Java class
+library will do that for you.
+</p>
+</div>
+</div>
+<div id="outline-container-orgf16c09c" class="outline-3">
+<h3 id="orgf16c09c"><span class="section-number-3">2.2</span> Continuations</h3>
+<div class="outline-text-3" id="text-2-2">
+<p>
+Continuations are a lower level concept upon which those lightweight
+threads are built. A continuation can be run, and can yield control
+back to the function which ran it. If it is run again then it will
+continue from the point at which it yielded.There is some argument
+over nomenclature, and whether what I've described is truly a
+continuation or a co-routine, but as we shall see later the
+distinction won't be very important in the end as we can build 'true
+continuations' from what we have.
+</p>
+</div>
+</div>
+</div>
+
+    </div>
+</section>
+
+
+<footer class="footer">
+    <p>Generated by <a href="http://www.gnu.org/software/emacs/">Emacs</a> 26.x (<a href="http://orgmode.org">Org mode</a> 9.x)</p>
+    <p>
+        Copyright &copy; 2012 - <span id="footerYear"></span> <a href="mailto:duncan &lt;at&gt; duncan-linux"></a>
+        &nbsp;&nbsp;-&nbsp;&nbsp;
+        Powered by <a href="https://github.com/kelvinh/org-page" target="_blank">org-page</a>
+        <script type="text/javascript">document.getElementById("footerYear").innerHTML = (new Date()).getFullYear();</script>
+    </p>
+</footer>
+
+  </body>
+</html>
