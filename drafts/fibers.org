@@ -48,9 +48,10 @@ local variables. Scheduling threads is heavyweight because it has to
 happen via kernel space and because the kernel only has a very limited
 idea of which thread it would be sensible to schedule
 next. Lightweight user mode threads and continuations can involve much
-less data since we only need to preserve part of the stack, and can
-often be very effectively scheduled since the application may often
-know precisely what to run next.
+less data since we only need to preserve the part of the stack between
+the call to run the continuation and the point at which it yielded,
+and can often be very effectively scheduled since the application may
+often know precisely what to run next.
 * Fibres and continuations in Ruby
 Ruby has its own model of fibres and continuations, and they aren't
 quite the same as Loom's
@@ -122,6 +123,152 @@ advancing the execution state.
 So given the quite different nature of these two models can we
 implement Ruby's fibres and continuations using what Loom provides?
 ** Implementing Ruby fibres
+Most of the code in TruffleRuby concerned with fibres is in a small
+set of classes, mainly =FiberManager= which handles the creation of
+fibres and how control is passed between them. This makes it quite
+easy for us to prototype new implementations.
 *** With Loom's Fibres
+Could we simply replace the use of threads in =FiberManager= with
+fibres? Well, we'd need a scheduler that could cope with both the
+explicit yielding from a Ruby =Fiber= and other parts of the Java
+class library park fibers for their own reasons. This is certainly an
+approach worth investigating, but Loom's fibre API is one area most
+likely to change, so we'll leave that attempt till later.
 *** With Loom's Continuations
+Loom's continuations seem like a much better fit. The =FiberManager=
+can represent Ruby =Fiber= with a =java.lang.Continution=, and
+orchestrate the transfer of control between them. Execution can
+process roughly as follows:
+**** Creating a =Fiber=
+This should create a =java.lang.Continuation= which will do the following:
+1. Fetch any arguments given to the fibre.
+2. Set itself as the current fibre.
+3. Run the provided code block.
+4. Clean up and tell the =FiberManager= what should be run next.
+The fibre won't be run immediately, that can happen when
+=Fiber#resume= is called.
+**** Transferring control from the thread into a =Fiber=
+The =FiberManager= needs to set any arguments to the fibre, and then
+run the continuation representing it. When control returns back to the
+=FiberManager= it should check what to schedule next.
+**** Transferring control from one =FIber= to another.
+The running fibre should set the next fibre to be run on the
+=FiberManager=, set any arguments for it, and then yield. Control will
+pass back to the =FiberManager= which should run the continuation for
+the scheduled fibre. That fibre will then set itself as the current
+fibre on the =FiberManager=, and get any arguments.
+**** Transferring control from a =Fiber= to the thread.
+This is much like the above case, except the =FiberManager= will not
+run another continuation, instead it will simply return the results to
+its original caller.
 ** Implementing =callcc=
+=callcc= is harder to map to Loom's fibres or continuations, at least
+at the moment. If the continuations can be cloned however then it
+could be done roughly as follows. Each heavyweight thread would need
+to be run almost entirely inside a =java.lang.Continuation=, and the
+control flow would go like this:
+1. Creating the continuation.
+   1. Create a Ruby =Continuation= object.
+   2. Execute the block passed to =callcc= passing the Ruby continuation in.
+   3. Place the Ruby continuation somewhere the thread can access it.
+   4. Yield control to the thread.
+   5. The thread clones the main =java.lang.Continuation= and sets it
+      on the Ruby continuation object.
+   6. The thread returns control to the original =java.lang.Continuation=.
+2. Calling the continuation.
+   1. Place the Ruby continuation somewhere the thread can access it.
+   2. Yield control to the thread.
+   3. The thread clones the =java.lang.Continuation= on the Ruby
+      continuation.
+   4. The thread returns control to this new cloned continuation.
+* The results
+So, having implemented a prototype for TruffleRuby the question is,
+how well does it work? The tests we can run at the moment are a little
+limited as the Loom prototype has some limitations, but it's enough to
+test a few things.
+** How many fibres can we support?
+It's very easy to support a large number of fibres if they are simply
+initialised but never used, so we want a test that will create a large
+set of fibres which are active. Something like this should do.
+#+BEGIN_SRC ruby
+def test_fiber_1(t)
+  Fiber.new do |x|
+    if x > t
+      Fiber.yield x
+    else
+      f = test_fiber_1(t)
+      f.transfer( x + 1 )
+    end
+  end
+end
+#+END_SRC
+Using this code I ran some tests to see how many fibres could be supported by different implementations.
+| Ruby implementation         |  Fibres |
+|-----------------------------+---------|
+| MRI 2.4                     |   30000 |
+| JRuby 9.1.11.0              |    3000 |
+| TruffleRuby (threads)       |    3000 |
+| TruffleRuby (continuations) | 1000000 |
+These results are very encouraging. The only real limit to the number
+of fibres we can support appears to be memory.
+
+Testing the performance of this is not easy with JRuby or TruffleRuby
+using threads as neither can clean up threads fast enough to run the
+test multiple times with large numbers of threads. We can however
+compare TruffleRuby with continuations to MRI 2.4. The test was run
+with 10000 fibres 20 times fibres to allow for warm up, and then
+another 20 times to collect timings.
+| Ruby implementation         | Average time (s) | Standard deviation |
+|-----------------------------+------------------+--------------------|
+| MRI 2.4                     |             0.49 |              0.032 |
+| TruffleRuby (continuations) |             0.20 |              0.064 |
+** Scheduling between fibres
+Another thing to test is how fast it is to transfer control from one
+fibre to another. We'll use a very small test which will be completely
+dominated by the transfer time. Here is the source for this test.
+#+BEGIN_SRC ruby
+def create_fibers(t)
+  fibers = []
+  0...t.times do
+    fibers << Fiber.new do |x|
+      while (true)
+        f = fibers[rand(t)]
+        Fiber.yield(f)
+      end
+    end
+  end
+  fibers
+end
+
+def schedule_fibers(t, n)
+  fibers = create_fibers(t)
+  next_fiber = fibers.first
+  0...(n * t).times do
+    next_fiber = next_fiber.resume
+  end
+end
+#+END_SRC
+This will create =t= fibres and transfer control among them =t * n=
+times. I had hoped to test this with large numbers of fibres, but
+again encountered issues with running the test using JRuby or
+TruffleRuby with threads, so tested with =t = 100= and =n = 1000=
+| Ruby implementation         | Average time (s) | Standard deviation |
+|-----------------------------+------------------+--------------------|
+| MRI 2.4                     |             0.26 |              0.010 |
+| JRuby 9.1.11.0              |             1.26 |              0.046 |
+| TruffleRuby (threads)       |             1.32 |              0.082 |
+| TruffleRuby (continuations) |             2.01 |               0.31 |
+As you can see, MRI beats all the other implementations easily, and
+Loom's continuations still have a lot of work to be done on them
+performance wise. Some experiments with varying the values of =t= and
+=n= suggests that MRI's time is mostly spent creating the fibres, and
+it's very quick to transfer control between them. All other
+implementations are dominated by the time to transfer control between
+fibres and have run times mostly unaffected by the total number of
+fibres created (at least within the range I could test).
+* Conclusion
+Project Loom allows TruffleRuby to support a large number of fibres in
+a lightweight way, There's still a lot of performance work to do, but
+these techniques look promising could also be used by JRuby and other
+JVM languages to support fibres, continuations, and other lightweight
+concurrency models.
