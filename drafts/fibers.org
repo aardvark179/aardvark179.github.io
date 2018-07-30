@@ -19,7 +19,7 @@ prototype we'll talk about here for TruffleRuby.
 Project Loom is an OpenJDK project with the goal
 #+BEGIN_QUOTE
 To explore and incubate Java VM features and APIs built on top of them
-for the implementation of lightweight user-mode threads (fibers),
+for the implementation of lightweight user-mode threads (fibres),
 delimited continuations (of some form), and related features, such as
 explicit tail-call.
 #+END_QUOTE
@@ -64,7 +64,7 @@ f = Fiber.new do |x|
   puts "Fiber called with #{x}"
 end
 #+END_SRC
-and call it lie this
+and call it like this
 #+BEGIN_SRC ruby
 f.resume(1)
 #+END_SRC
@@ -133,7 +133,7 @@ easy for us to prototype new implementations.
 Could we simply replace the use of threads in =FiberManager= with
 fibres? Well, we'd need a scheduler that could cope with both the
 explicit yielding from a Ruby =Fiber= and other parts of the Java
-class library park fibers for their own reasons. This is certainly an
+class library park fibres for their own reasons. This is certainly an
 approach worth investigating, but Loom's fibre API is one area most
 likely to change, so we'll leave that attempt till later.
 *** With Loom's Continuations
