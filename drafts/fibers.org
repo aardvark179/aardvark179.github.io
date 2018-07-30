@@ -207,8 +207,10 @@ end
 Using this code I ran some tests to see how many fibres could be
 supported by different implementations. This was done by making an
 initial guess and then performing a binary search to find the
-approximate number of fibres that could be supported with raising an
-error, or causing the VM to crash completely.
+approximate number of fibres that could be supported without raising
+an error, or causing the VM to crash completely. MRI 2.5 has made
+changes to its fibre code and can now support a larger number of
+fibres. I'll update these results with figures for MRI 2.5 soon.
 | Ruby implementation         |  Fibres |
 |-----------------------------+---------|
 | MRI 2.4                     |   30000 |
