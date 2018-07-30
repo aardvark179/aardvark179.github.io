@@ -4,8 +4,8 @@
     <title>aardvark179.github.io</title>
     <link>https://aardvark179.github.io</link>
     <description></description>
-    <pubDate>Mon, 30 Jul 2018 13:50:42 BST</pubDate>
-    <lastBuildDate>Mon, 30 Jul 2018 13:50:42 BST</lastBuildDate>
+    <pubDate>Mon, 30 Jul 2018 14:26:36 BST</pubDate>
+    <lastBuildDate>Mon, 30 Jul 2018 14:26:36 BST</lastBuildDate>
     <docs>http://www.rssboard.org/rss-specification</docs>
     <generator>Org-page static site generator (https://github.com/kelvinh/org-page)</generator>
     <item>
@@ -19,39 +19,39 @@
 <h2>Table of Contents</h2>
 <div id="text-table-of-contents">
 <ul>
-<li><a href="#org4a9a67f">1. Disclaimer</a></li>
-<li><a href="#orgf126946">2. Lightweight threads, continuations, and Project Loom.</a>
+<li><a href="#orgbac2684">1. Disclaimer</a></li>
+<li><a href="#org4325152">2. Lightweight threads, continuations, and Project Loom.</a>
 <ul>
-<li><a href="#org4532df8">2.1. Lightweight user mode threads</a></li>
-<li><a href="#org91ce6a6">2.2. Continuations</a></li>
-<li><a href="#orgff3f507">2.3. What makes these features more light weight than <code>java.lang.Thread</code>?</a></li>
+<li><a href="#orgf0d2a58">2.1. Lightweight user mode threads</a></li>
+<li><a href="#org09f46e4">2.2. Continuations</a></li>
+<li><a href="#org5832a88">2.3. What makes these features more light weight than <code>java.lang.Thread</code>?</a></li>
 </ul>
 </li>
-<li><a href="#org3fd200e">3. Fibres and continuations in Ruby</a>
+<li><a href="#orgc38825a">3. Fibres and continuations in Ruby</a>
 <ul>
-<li><a href="#org906c9f8">3.1. Fibres</a></li>
-<li><a href="#orgff87d25">3.2. Continuations</a></li>
+<li><a href="#org169f128">3.1. Fibres</a></li>
+<li><a href="#org1255de9">3.2. Continuations</a></li>
 </ul>
 </li>
-<li><a href="#org20c2ca8">4. The differences between these two models</a></li>
-<li><a href="#orgb4c21f1">5. Implementing Ruby's model using Loom's</a>
+<li><a href="#orgb03875b">4. The differences between these two models</a></li>
+<li><a href="#org40d64ae">5. Implementing Ruby's model using Loom's</a>
 <ul>
-<li><a href="#org717e6bc">5.1. Implementing Ruby fibres</a>
+<li><a href="#orgb754113">5.1. Implementing Ruby fibres</a>
 <ul>
-<li><a href="#orgb4e7a32">5.1.1. With Loom's Fibres</a></li>
-<li><a href="#orgb85cc1c">5.1.2. With Loom's Continuations</a></li>
+<li><a href="#orgd20aafd">5.1.1. With Loom's Fibres</a></li>
+<li><a href="#org1900852">5.1.2. With Loom's Continuations</a></li>
 </ul>
 </li>
-<li><a href="#orgcba422d">5.2. Implementing <code>callcc</code></a></li>
+<li><a href="#org23ba34f">5.2. Implementing <code>callcc</code></a></li>
 </ul>
 </li>
-<li><a href="#orgf8609a5">6. The results</a>
+<li><a href="#org9adbfa3">6. The results</a>
 <ul>
-<li><a href="#org329d1cf">6.1. How many fibres can we support?</a></li>
-<li><a href="#org0ce6a0e">6.2. Scheduling between fibres</a></li>
+<li><a href="#org697dfe7">6.1. How many fibres can we support?</a></li>
+<li><a href="#orgef1b022">6.2. Scheduling between fibres</a></li>
 </ul>
 </li>
-<li><a href="#org611240b">7. Conclusion</a></li>
+<li><a href="#orgb41bc0b">7. Conclusion</a></li>
 </ul>
 </div>
 </div>
@@ -65,19 +65,21 @@ but that's starting to change with <a href="http://openjdk.java.net/projects/loo
 what it gives, and how we can use that to implement fibres that can
 scale beyond even MRI's.
 </p>
-<div id="outline-container-org4a9a67f" class="outline-2">
-<h2 id="org4a9a67f"><span class="section-number-2">1</span> Disclaimer</h2>
+<div id="outline-container-orgbac2684" class="outline-2">
+<h2 id="orgbac2684"><span class="section-number-2">1</span> Disclaimer</h2>
 <div class="outline-text-2" id="text-1">
 <p>
 Everything I"m talking about here is based on early prototypes. The
 APIs and features may change radically before anything nears being
 production, and there is no fixed timetable for when these feature
-will arrive in a production JVM except, "When it's done."
+will arrive in a production JVM except, "When it's done." I
+contributed the support for Graal to Loom, and implemented the
+prototype we'll talk about here for TruffleRuby.
 </p>
 </div>
 </div>
-<div id="outline-container-orgf126946" class="outline-2">
-<h2 id="orgf126946"><span class="section-number-2">2</span> Lightweight threads, continuations, and Project Loom.</h2>
+<div id="outline-container-org4325152" class="outline-2">
+<h2 id="org4325152"><span class="section-number-2">2</span> Lightweight threads, continuations, and Project Loom.</h2>
 <div class="outline-text-2" id="text-2">
 <p>
 Project Loom is an OpenJDK project with the goal
@@ -95,8 +97,8 @@ That may sound complex, but let's look at it bit by bit and see what
 it gives us in Java, and how we can use that in TruffleRuby.
 </p>
 </div>
-<div id="outline-container-org4532df8" class="outline-3">
-<h3 id="org4532df8"><span class="section-number-3">2.1</span> Lightweight user mode threads</h3>
+<div id="outline-container-orgf0d2a58" class="outline-3">
+<h3 id="orgf0d2a58"><span class="section-number-3">2.1</span> Lightweight user mode threads</h3>
 <div class="outline-text-3" id="text-2-1">
 <p>
 These are currently called <code>java.lang.Fiber</code> in the project loom
@@ -112,8 +114,8 @@ library will do that for you.
 </p>
 </div>
 </div>
-<div id="outline-container-org91ce6a6" class="outline-3">
-<h3 id="org91ce6a6"><span class="section-number-3">2.2</span> Continuations</h3>
+<div id="outline-container-org09f46e4" class="outline-3">
+<h3 id="org09f46e4"><span class="section-number-3">2.2</span> Continuations</h3>
 <div class="outline-text-3" id="text-2-2">
 <p>
 Continuations are a lower level concept upon which those lightweight
@@ -124,8 +126,8 @@ local variables, and so forth.
 </p>
 </div>
 </div>
-<div id="outline-container-orgff3f507" class="outline-3">
-<h3 id="orgff3f507"><span class="section-number-3">2.3</span> What makes these features more light weight than <code>java.lang.Thread</code>?</h3>
+<div id="outline-container-org5832a88" class="outline-3">
+<h3 id="org5832a88"><span class="section-number-3">2.3</span> What makes these features more light weight than <code>java.lang.Thread</code>?</h3>
 <div class="outline-text-3" id="text-2-3">
 <p>
 A normal <code>java.lang.Thread</code> in Hotspot is a normal operating system
@@ -143,16 +145,16 @@ often know precisely what to run next.
 </div>
 </div>
 </div>
-<div id="outline-container-org3fd200e" class="outline-2">
-<h2 id="org3fd200e"><span class="section-number-2">3</span> Fibres and continuations in Ruby</h2>
+<div id="outline-container-orgc38825a" class="outline-2">
+<h2 id="orgc38825a"><span class="section-number-2">3</span> Fibres and continuations in Ruby</h2>
 <div class="outline-text-2" id="text-3">
 <p>
 Ruby has its own model of fibres and continuations, and they aren't
 quite the same as Loom's
 </p>
 </div>
-<div id="outline-container-org906c9f8" class="outline-3">
-<h3 id="org906c9f8"><span class="section-number-3">3.1</span> Fibres</h3>
+<div id="outline-container-org169f128" class="outline-3">
+<h3 id="org169f128"><span class="section-number-3">3.1</span> Fibres</h3>
 <div class="outline-text-3" id="text-3-1">
 <p>
 Ruby has the <code>Fiber</code> class. You create a <code>Fiber</code> with a block like this
@@ -177,8 +179,8 @@ which transferred control to them.
 </p>
 </div>
 </div>
-<div id="outline-container-orgff87d25" class="outline-3">
-<h3 id="orgff87d25"><span class="section-number-3">3.2</span> Continuations</h3>
+<div id="outline-container-org1255de9" class="outline-3">
+<h3 id="org1255de9"><span class="section-number-3">3.2</span> Continuations</h3>
 <div class="outline-text-3" id="text-3-2">
 <p>
 Continuations in Ruby are created using the <code>Kernel#callcc</code>
@@ -233,8 +235,8 @@ support them in TruffleRuby.
 </div>
 </div>
 </div>
-<div id="outline-container-org20c2ca8" class="outline-2">
-<h2 id="org20c2ca8"><span class="section-number-2">4</span> The differences between these two models</h2>
+<div id="outline-container-orgb03875b" class="outline-2">
+<h2 id="orgb03875b"><span class="section-number-2">4</span> The differences between these two models</h2>
 <div class="outline-text-2" id="text-4">
 <p>
 As you can see these models differ in a couple of important ways.
@@ -254,16 +256,16 @@ advancing the execution state.
 </p>
 </div>
 </div>
-<div id="outline-container-orgb4c21f1" class="outline-2">
-<h2 id="orgb4c21f1"><span class="section-number-2">5</span> Implementing Ruby's model using Loom's</h2>
+<div id="outline-container-org40d64ae" class="outline-2">
+<h2 id="org40d64ae"><span class="section-number-2">5</span> Implementing Ruby's model using Loom's</h2>
 <div class="outline-text-2" id="text-5">
 <p>
 So given the quite different nature of these two models can we
 implement Ruby's fibres and continuations using what Loom provides?
 </p>
 </div>
-<div id="outline-container-org717e6bc" class="outline-3">
-<h3 id="org717e6bc"><span class="section-number-3">5.1</span> Implementing Ruby fibres</h3>
+<div id="outline-container-orgb754113" class="outline-3">
+<h3 id="orgb754113"><span class="section-number-3">5.1</span> Implementing Ruby fibres</h3>
 <div class="outline-text-3" id="text-5-1">
 <p>
 Most of the code in TruffleRuby concerned with fibres is in a small
@@ -272,8 +274,8 @@ fibres and how control is passed between them. This makes it quite
 easy for us to prototype new implementations.
 </p>
 </div>
-<div id="outline-container-orgb4e7a32" class="outline-4">
-<h4 id="orgb4e7a32"><span class="section-number-4">5.1.1</span> With Loom's Fibres</h4>
+<div id="outline-container-orgd20aafd" class="outline-4">
+<h4 id="orgd20aafd"><span class="section-number-4">5.1.1</span> With Loom's Fibres</h4>
 <div class="outline-text-4" id="text-5-1-1">
 <p>
 Could we simply replace the use of threads in <code>FiberManager</code> with
@@ -285,8 +287,8 @@ likely to change, so we'll leave that attempt till later.
 </p>
 </div>
 </div>
-<div id="outline-container-orgb85cc1c" class="outline-4">
-<h4 id="orgb85cc1c"><span class="section-number-4">5.1.2</span> With Loom's Continuations</h4>
+<div id="outline-container-org1900852" class="outline-4">
+<h4 id="org1900852"><span class="section-number-4">5.1.2</span> With Loom's Continuations</h4>
 <div class="outline-text-4" id="text-5-1-2">
 <p>
 Loom's continuations seem like a much better fit. The <code>FiberManager</code>
@@ -296,7 +298,7 @@ process roughly as follows:
 </p>
 </div>
 <ol class="org-ol">
-<li><a id="org675a98d"></a>Creating a <code>Fiber</code><br />
+<li><a id="org11e9085"></a>Creating a <code>Fiber</code><br />
 <div class="outline-text-5" id="text-5-1-2-1">
 <p>
 This should create a <code>java.lang.Continuation</code> which will do the following:
@@ -313,7 +315,7 @@ The fibre won't be run immediately, that can happen when
 </p>
 </div>
 </li>
-<li><a id="org273d149"></a>Transferring control from the thread into a <code>Fiber</code><br />
+<li><a id="org01e18fb"></a>Transferring control from the thread into a <code>Fiber</code><br />
 <div class="outline-text-5" id="text-5-1-2-2">
 <p>
 The <code>FiberManager</code> needs to set any arguments to the fibre, and then
@@ -322,7 +324,7 @@ run the continuation representing it. When control returns back to the
 </p>
 </div>
 </li>
-<li><a id="org9ad1b28"></a>Transferring control from one <code>FIber</code> to another.<br />
+<li><a id="org740dc2b"></a>Transferring control from one <code>FIber</code> to another.<br />
 <div class="outline-text-5" id="text-5-1-2-3">
 <p>
 The running fibre should set the next fibre to be run on the
@@ -333,7 +335,7 @@ fibre on the <code>FiberManager</code>, and get any arguments.
 </p>
 </div>
 </li>
-<li><a id="org6125722"></a>Transferring control from a <code>Fiber</code> to the thread.<br />
+<li><a id="orgf60526e"></a>Transferring control from a <code>Fiber</code> to the thread.<br />
 <div class="outline-text-5" id="text-5-1-2-4">
 <p>
 This is much like the above case, except the <code>FiberManager</code> will not
@@ -345,8 +347,8 @@ its original caller.
 </ol>
 </div>
 </div>
-<div id="outline-container-orgcba422d" class="outline-3">
-<h3 id="orgcba422d"><span class="section-number-3">5.2</span> Implementing <code>callcc</code></h3>
+<div id="outline-container-org23ba34f" class="outline-3">
+<h3 id="org23ba34f"><span class="section-number-3">5.2</span> Implementing <code>callcc</code></h3>
 <div class="outline-text-3" id="text-5-2">
 <p>
 <code>callcc</code> is harder to map to Loom's fibres or continuations, at least
@@ -378,8 +380,8 @@ continuation.</li>
 </div>
 </div>
 </div>
-<div id="outline-container-orgf8609a5" class="outline-2">
-<h2 id="orgf8609a5"><span class="section-number-2">6</span> The results</h2>
+<div id="outline-container-org9adbfa3" class="outline-2">
+<h2 id="org9adbfa3"><span class="section-number-2">6</span> The results</h2>
 <div class="outline-text-2" id="text-6">
 <p>
 So, having implemented a prototype for TruffleRuby the question is,
@@ -388,8 +390,8 @@ limited as the Loom prototype has some limitations, but it's enough to
 test a few things.
 </p>
 </div>
-<div id="outline-container-org329d1cf" class="outline-3">
-<h3 id="org329d1cf"><span class="section-number-3">6.1</span> How many fibres can we support?</h3>
+<div id="outline-container-org697dfe7" class="outline-3">
+<h3 id="org697dfe7"><span class="section-number-3">6.1</span> How many fibres can we support?</h3>
 <div class="outline-text-3" id="text-6-1">
 <p>
 It's very easy to support a large number of fibres if they are simply
@@ -410,7 +412,11 @@ end
 </pre>
 </div>
 <p>
-Using this code I ran some tests to see how many fibres could be supported by different implementations.
+Using this code I ran some tests to see how many fibres could be
+supported by different implementations. This was done by making an
+initial guess and then performing a binary search to find the
+approximate number of fibres that could be supported with raising an
+error, or causing the VM to crash completely.
 </p>
 <table border="2" cellspacing="0" cellpadding="6" rules="groups" frame="hsides">
 
@@ -494,8 +500,8 @@ another 20 times to collect timings.
 </table>
 </div>
 </div>
-<div id="outline-container-org0ce6a0e" class="outline-3">
-<h3 id="org0ce6a0e"><span class="section-number-3">6.2</span> Scheduling between fibres</h3>
+<div id="outline-container-orgef1b022" class="outline-3">
+<h3 id="orgef1b022"><span class="section-number-3">6.2</span> Scheduling between fibres</h3>
 <div class="outline-text-3" id="text-6-2">
 <p>
 Another thing to test is how fast it is to transfer control from one
@@ -587,8 +593,8 @@ fibres created (at least within the range I could test).
 </div>
 </div>
 </div>
-<div id="outline-container-org611240b" class="outline-2">
-<h2 id="org611240b"><span class="section-number-2">7</span> Conclusion</h2>
+<div id="outline-container-orgb41bc0b" class="outline-2">
+<h2 id="orgb41bc0b"><span class="section-number-2">7</span> Conclusion</h2>
 <div class="outline-text-2" id="text-7">
 <p>
 Project Loom allows TruffleRuby to support a large number of fibres in
@@ -613,8 +619,8 @@ concurrency models.
     <div id="outline-container-sec-" class="row" style="padding-top: 70px">
         <div class="col-md-2"></div>
             <h1>Making special variables less special in TruffleRuby</h1>
-            <div id="outline-container-org2396e39" class="outline-2">
-<h2 id="org2396e39"><span class="section-number-2">1</span> Making special variables less special in TruffleRuby</h2>
+            <div id="outline-container-org0fb9a82" class="outline-2">
+<h2 id="org0fb9a82"><span class="section-number-2">1</span> Making special variables less special in TruffleRuby</h2>
 <div class="outline-text-2" id="text-1">
 <p>
 Ruby has quite a large set of <a href="http://ruby-doc.org/docs/ruby-doc-bundle/Manual/man-1.4/variable.html#variables">pre-defined global variables</a> which are
@@ -637,8 +643,8 @@ actually implementing Ruby itself, even in implementations that try to
 write as much of their standard library in Ruby as they can.
 </p>
 </div>
-<div id="outline-container-orgbd89bf4" class="outline-3">
-<h3 id="orgbd89bf4"><span class="section-number-3">1.1</span> Hooked variables</h3>
+<div id="outline-container-org07d41b8" class="outline-3">
+<h3 id="org07d41b8"><span class="section-number-3">1.1</span> Hooked variables</h3>
 <div class="outline-text-3" id="text-1-1">
 <p>
 The most important thing we're going to need is a way to define
@@ -681,8 +687,8 @@ so we need to be able to provide a procedure for that.
 </p>
 </div>
 </div>
-<div id="outline-container-org20bdc65" class="outline-3">
-<h3 id="org20bdc65"><span class="section-number-3">1.2</span> Trivial example</h3>
+<div id="outline-container-org20c723f" class="outline-3">
+<h3 id="org20c723f"><span class="section-number-3">1.2</span> Trivial example</h3>
 <div class="outline-text-3" id="text-1-2">
 <p>
 Let's see this in action by defining our own hooked variable.
@@ -704,8 +710,8 @@ let's see if we can define some of the simple special variables.
 </p>
 </div>
 </div>
-<div id="outline-container-org6794cb5" class="outline-3">
-<h3 id="org6794cb5"><span class="section-number-3">1.3</span> Variables related to ARGF</h3>
+<div id="outline-container-orgccf1872" class="outline-3">
+<h3 id="orgccf1872"><span class="section-number-3">1.3</span> Variables related to ARGF</h3>
 <div class="outline-text-3" id="text-1-3">
 <p>
 Several special variables are connected to <code>ARGF</code>, they link to
@@ -745,8 +751,8 @@ instance variable on <code>ARGF</code> like this:
 </div>
 </div>
 
-<div id="outline-container-orgc4f842c" class="outline-3">
-<h3 id="orgc4f842c"><span class="section-number-3">1.4</span> Other simple cases</h3>
+<div id="outline-container-orge05f2ec" class="outline-3">
+<h3 id="orge05f2ec"><span class="section-number-3">1.4</span> Other simple cases</h3>
 <div class="outline-text-3" id="text-1-4">
 <p>
 Quite a few variables allow writes to them, but include some extra
@@ -775,8 +781,8 @@ they can all be done as nice simple Ruby.
 </p>
 </div>
 </div>
-<div id="outline-container-org431d071" class="outline-3">
-<h3 id="org431d071"><span class="section-number-3">1.5</span> But will it optimise?</h3>
+<div id="outline-container-orgf820b41" class="outline-3">
+<h3 id="orgf820b41"><span class="section-number-3">1.5</span> But will it optimise?</h3>
 <div class="outline-text-3" id="text-1-5">
 <p>
 All the variables I've mentioned so far have a few things in
@@ -787,8 +793,8 @@ much more heavily and are more complex to implement, so let's talk
 about what will optimise now.
 </p>
 </div>
-<div id="outline-container-org40c92d0" class="outline-4">
-<h4 id="org40c92d0"><span class="section-number-4">1.5.1</span> A normal global</h4>
+<div id="outline-container-org5f047de" class="outline-4">
+<h4 id="org5f047de"><span class="section-number-4">1.5.1</span> A normal global</h4>
 <div class="outline-text-4" id="text-1-5-1">
 <p>
 What happens when we run a simple statement like <code>$foo</code> in
@@ -802,8 +808,8 @@ value from the storage. That should be retty fast, right?
 </p>
 </div>
 </div>
-<div id="outline-container-org0905249" class="outline-4">
-<h4 id="org0905249"><span class="section-number-4">1.5.2</span> Optimising for constant values</h4>
+<div id="outline-container-org5c90cf3" class="outline-4">
+<h4 id="org5c90cf3"><span class="section-number-4">1.5.2</span> Optimising for constant values</h4>
 <div class="outline-text-4" id="text-1-5-2">
 <p>
 Most global variables won't change their value, and we'd like be able
@@ -818,8 +824,8 @@ the compiled code. So, how do we use this for global variables?
 </p>
 </div>
 </div>
-<div id="outline-container-orgd6e4b6d" class="outline-4">
-<h4 id="orgd6e4b6d"><span class="section-number-4">1.5.3</span> Specialising</h4>
+<div id="outline-container-org6141b28" class="outline-4">
+<h4 id="org6141b28"><span class="section-number-4">1.5.3</span> Specialising</h4>
 <div class="outline-text-4" id="text-1-5-3">
 <p>
 <code>ReadGlobalVariableNode</code> is slightly more complex than I let on. It
@@ -848,8 +854,8 @@ and we'll fall back to getting the value from storage every time.
 </p>
 </div>
 </div>
-<div id="outline-container-org8ee4b00" class="outline-4">
-<h4 id="org8ee4b00"><span class="section-number-4">1.5.4</span> But what about those hooked variables we just defined?</h4>
+<div id="outline-container-org03a6870" class="outline-4">
+<h4 id="org03a6870"><span class="section-number-4">1.5.4</span> But what about those hooked variables we just defined?</h4>
 <div class="outline-text-4" id="text-1-5-4">
 <p>
 Once again <code>ReadGlobalVariableNode</code> is slightly more complex
@@ -886,8 +892,8 @@ the JIT can optimise away all the apparent extra work.
 </p>
 </div>
 </div>
-<div id="outline-container-org8ab3de2" class="outline-4">
-<h4 id="org8ab3de2"><span class="section-number-4">1.5.5</span> Not so constant</h4>
+<div id="outline-container-org6e65a66" class="outline-4">
+<h4 id="org6e65a66"><span class="section-number-4">1.5.5</span> Not so constant</h4>
 <div class="outline-text-4" id="text-1-5-5">
 <p>
 All that would be great if we only had that single lambda that did
@@ -913,8 +919,8 @@ at each of these call sites things should still work nicely.
 </div>
 </div>
 </div>
-<div id="outline-container-org3f7a9bd" class="outline-3">
-<h3 id="org3f7a9bd"><span class="section-number-3">1.6</span> There's special, and then there's special</h3>
+<div id="outline-container-orgff31f36" class="outline-3">
+<h3 id="orgff31f36"><span class="section-number-3">1.6</span> There's special, and then there's special</h3>
 <div class="outline-text-3" id="text-1-6">
 <p>
 Next up the difficulty ladder are variables which are local to a
@@ -975,8 +981,8 @@ expressions, and they are even more complex and subtle.
 </p>
 </div>
 </div>
-<div id="outline-container-orgdf3e536" class="outline-3">
-<h3 id="orgdf3e536"><span class="section-number-3">1.7</span> &#x2026;and then there's really special</h3>
+<div id="outline-container-org8168f1b" class="outline-3">
+<h3 id="org8168f1b"><span class="section-number-3">1.7</span> &#x2026;and then there's really special</h3>
 <div class="outline-text-3" id="text-1-7">
 <p>
 <code>$~</code> is more complex than you might realise. It holds the value of the
@@ -1007,8 +1013,8 @@ unexpectedly change the value of <code>$~</code> that you might be relying on, b
 it is going to make our job implementing it harder.
 </p>
 </div>
-<div id="outline-container-org489b534" class="outline-4">
-<h4 id="org489b534"><span class="section-number-4">1.7.1</span> Getting and setting the last match</h4>
+<div id="outline-container-orgf054c64" class="outline-4">
+<h4 id="orgf054c64"><span class="section-number-4">1.7.1</span> Getting and setting the last match</h4>
 <div class="outline-text-4" id="text-1-7-1">
 <p>
 In our core library we need a way to reach up to the caller and set
@@ -1055,8 +1061,8 @@ split the hooks for each call site if they take a binding.
 </p>
 </div>
 </div>
-<div id="outline-container-org3451820" class="outline-4">
-<h4 id="org3451820"><span class="section-number-4">1.7.2</span> Defining <code>$~</code> and setting the last match</h4>
+<div id="outline-container-org94a1149" class="outline-4">
+<h4 id="org94a1149"><span class="section-number-4">1.7.2</span> Defining <code>$~</code> and setting the last match</h4>
 <div class="outline-text-4" id="text-1-7-2">
 <p>
 With that in place <code>$~</code> can simply be defined as
@@ -1077,8 +1083,8 @@ happening and automatically mark methods to be split.
 </p>
 </div>
 </div>
-<div id="outline-container-org5b722cf" class="outline-4">
-<h4 id="org5b722cf"><span class="section-number-4">1.7.3</span> The other regexp variables</h4>
+<div id="outline-container-org33a275b" class="outline-4">
+<h4 id="org33a275b"><span class="section-number-4">1.7.3</span> The other regexp variables</h4>
 <div class="outline-text-4" id="text-1-7-3">
 <p>
 Most of the other variables connected with regular expressions are
@@ -1104,8 +1110,8 @@ the things that makes these variables extra special!
 </div>
 </div>
 </div>
-<div id="outline-container-org15de042" class="outline-3">
-<h3 id="org15de042"><span class="section-number-3">1.8</span> Testing performance</h3>
+<div id="outline-container-org947ec39" class="outline-3">
+<h3 id="org947ec39"><span class="section-number-3">1.8</span> Testing performance</h3>
 <div class="outline-text-3" id="text-1-8">
 <p>
 Let's check global variable reads and hooked variable reads are still
@@ -1235,8 +1241,8 @@ is 3 times slower with hooked variables.
 </p>
 </div>
 </div>
-<div id="outline-container-orgfd42567" class="outline-3">
-<h3 id="orgfd42567"><span class="section-number-3">1.9</span> What's left?</h3>
+<div id="outline-container-orgb9b133e" class="outline-3">
+<h3 id="orgb9b133e"><span class="section-number-3">1.9</span> What's left?</h3>
 <div class="outline-text-3" id="text-1-9">
 <p>
 After this work there's only two special bits of variable support left
@@ -1269,8 +1275,8 @@ reduced or eliminated, and we migth look at rewriting the storage for
 </p>
 </div>
 </div>
-<div id="outline-container-org3e9a18e" class="outline-3">
-<h3 id="org3e9a18e"><span class="section-number-3">1.10</span> Conclusion</h3>
+<div id="outline-container-orgce5024d" class="outline-3">
+<h3 id="orgce5024d"><span class="section-number-3">1.10</span> Conclusion</h3>
 <div class="outline-text-3" id="text-1-10">
 <p>
 TruffleRuby lets us implement more of Ruby in Ruby itself while still
