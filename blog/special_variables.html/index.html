@@ -46,8 +46,8 @@
     <div id="outline-container-sec-" class="row" style="padding-top: 70px">
         <div class="col-md-2"></div>
             <h1>Making special variables less special in TruffleRuby</h1>
-            <div id="outline-container-orgcf3ffe8" class="outline-2">
-<h2 id="orgcf3ffe8"><span class="section-number-2">1</span> Making special variables less special in TruffleRuby</h2>
+            <div id="outline-container-orgfe0a9a4" class="outline-2">
+<h2 id="orgfe0a9a4"><span class="section-number-2">1</span> Making special variables less special in TruffleRuby</h2>
 <div class="outline-text-2" id="text-1">
 <p>
 Ruby has quite a large set of <a href="http://ruby-doc.org/docs/ruby-doc-bundle/Manual/man-1.4/variable.html#variables">pre-defined global variables</a> which are
@@ -70,8 +70,8 @@ actually implementing Ruby itself, even in implementations that try to
 write as much of their standard library in Ruby as they can.
 </p>
 </div>
-<div id="outline-container-orge003253" class="outline-3">
-<h3 id="orge003253"><span class="section-number-3">1.1</span> Hooked variables</h3>
+<div id="outline-container-orgfb5d610" class="outline-3">
+<h3 id="orgfb5d610"><span class="section-number-3">1.1</span> Hooked variables</h3>
 <div class="outline-text-3" id="text-1-1">
 <p>
 The most important thing we're going to need is a way to define
@@ -114,8 +114,8 @@ so we need to be able to provide a procedure for that.
 </p>
 </div>
 </div>
-<div id="outline-container-org296bc31" class="outline-3">
-<h3 id="org296bc31"><span class="section-number-3">1.2</span> Trivial example</h3>
+<div id="outline-container-orga7a2e76" class="outline-3">
+<h3 id="orga7a2e76"><span class="section-number-3">1.2</span> Trivial example</h3>
 <div class="outline-text-3" id="text-1-2">
 <p>
 Let's see this in action by defining our own hooked variable.
@@ -137,8 +137,8 @@ let's see if we can define some of the simple special variables.
 </p>
 </div>
 </div>
-<div id="outline-container-org6675aa9" class="outline-3">
-<h3 id="org6675aa9"><span class="section-number-3">1.3</span> Variables related to ARGF</h3>
+<div id="outline-container-org8d83514" class="outline-3">
+<h3 id="org8d83514"><span class="section-number-3">1.3</span> Variables related to ARGF</h3>
 <div class="outline-text-3" id="text-1-3">
 <p>
 Several special variables are connected to <code>ARGF</code>, they link to
@@ -178,8 +178,8 @@ instance variable on <code>ARGF</code> like this:
 </div>
 </div>
 
-<div id="outline-container-org06e5c2b" class="outline-3">
-<h3 id="org06e5c2b"><span class="section-number-3">1.4</span> Other simple cases</h3>
+<div id="outline-container-orgf32a613" class="outline-3">
+<h3 id="orgf32a613"><span class="section-number-3">1.4</span> Other simple cases</h3>
 <div class="outline-text-3" id="text-1-4">
 <p>
 Quite a few variables allow writes to them, but include some extra
@@ -208,8 +208,8 @@ they can all be done as nice simple Ruby.
 </p>
 </div>
 </div>
-<div id="outline-container-org6f3d626" class="outline-3">
-<h3 id="org6f3d626"><span class="section-number-3">1.5</span> But will it optimise?</h3>
+<div id="outline-container-orgc5274b4" class="outline-3">
+<h3 id="orgc5274b4"><span class="section-number-3">1.5</span> But will it optimise?</h3>
 <div class="outline-text-3" id="text-1-5">
 <p>
 All the variables I've mentioned so far have a few things in
@@ -220,8 +220,8 @@ much more heavily and are more complex to implement, so let's talk
 about what will optimise now.
 </p>
 </div>
-<div id="outline-container-org8d64766" class="outline-4">
-<h4 id="org8d64766"><span class="section-number-4">1.5.1</span> A normal global</h4>
+<div id="outline-container-orge25b1dc" class="outline-4">
+<h4 id="orge25b1dc"><span class="section-number-4">1.5.1</span> A normal global</h4>
 <div class="outline-text-4" id="text-1-5-1">
 <p>
 What happens when we run a simple statement like <code>$foo</code> in
@@ -235,8 +235,8 @@ value from the storage. That should be retty fast, right?
 </p>
 </div>
 </div>
-<div id="outline-container-orgfcf4b97" class="outline-4">
-<h4 id="orgfcf4b97"><span class="section-number-4">1.5.2</span> Optimising for constant values</h4>
+<div id="outline-container-orgb816401" class="outline-4">
+<h4 id="orgb816401"><span class="section-number-4">1.5.2</span> Optimising for constant values</h4>
 <div class="outline-text-4" id="text-1-5-2">
 <p>
 Most global variables won't change their value, and we'd like be able
@@ -251,8 +251,8 @@ the compiled code. So, how do we use this for global variables?
 </p>
 </div>
 </div>
-<div id="outline-container-org570c65e" class="outline-4">
-<h4 id="org570c65e"><span class="section-number-4">1.5.3</span> Specialising</h4>
+<div id="outline-container-org9c6deff" class="outline-4">
+<h4 id="org9c6deff"><span class="section-number-4">1.5.3</span> Specialising</h4>
 <div class="outline-text-4" id="text-1-5-3">
 <p>
 <code>ReadGlobalVariableNode</code> is slightly more complex than I let on. It
@@ -281,8 +281,8 @@ and we'll fall back to getting the value from storage every time.
 </p>
 </div>
 </div>
-<div id="outline-container-orgb522525" class="outline-4">
-<h4 id="orgb522525"><span class="section-number-4">1.5.4</span> But what about those hooked variables we just defined?</h4>
+<div id="outline-container-org87bcfea" class="outline-4">
+<h4 id="org87bcfea"><span class="section-number-4">1.5.4</span> But what about those hooked variables we just defined?</h4>
 <div class="outline-text-4" id="text-1-5-4">
 <p>
 Once again <code>ReadGlobalVariableNode</code> is slightly more complex
@@ -319,8 +319,8 @@ the JIT can optimise away all the apparent extra work.
 </p>
 </div>
 </div>
-<div id="outline-container-orgdae354e" class="outline-4">
-<h4 id="orgdae354e"><span class="section-number-4">1.5.5</span> Not so constant</h4>
+<div id="outline-container-orgea68ffd" class="outline-4">
+<h4 id="orgea68ffd"><span class="section-number-4">1.5.5</span> Not so constant</h4>
 <div class="outline-text-4" id="text-1-5-5">
 <p>
 All that would be great if we only had that single lambda that did
@@ -346,8 +346,8 @@ at each of these call sites things should still work nicely.
 </div>
 </div>
 </div>
-<div id="outline-container-org9a08f7d" class="outline-3">
-<h3 id="org9a08f7d"><span class="section-number-3">1.6</span> There's special, and then there's special</h3>
+<div id="outline-container-org1efbecf" class="outline-3">
+<h3 id="org1efbecf"><span class="section-number-3">1.6</span> There's special, and then there's special</h3>
 <div class="outline-text-3" id="text-1-6">
 <p>
 Next up the difficulty ladder are variables which are local to a
@@ -408,8 +408,8 @@ expressions, and they are even more complex and subtle.
 </p>
 </div>
 </div>
-<div id="outline-container-org92e9d43" class="outline-3">
-<h3 id="org92e9d43"><span class="section-number-3">1.7</span> &#x2026;and then there's really special</h3>
+<div id="outline-container-org8e6cd8c" class="outline-3">
+<h3 id="org8e6cd8c"><span class="section-number-3">1.7</span> &#x2026;and then there's really special</h3>
 <div class="outline-text-3" id="text-1-7">
 <p>
 <code>$~</code> is more complex than you might realise. It holds the value of the
@@ -440,8 +440,8 @@ unexpectedly change the value of <code>$~</code> that you might be relying on, b
 it is going to make our job implementing it harder.
 </p>
 </div>
-<div id="outline-container-org50da399" class="outline-4">
-<h4 id="org50da399"><span class="section-number-4">1.7.1</span> Getting and setting the last match</h4>
+<div id="outline-container-orga046705" class="outline-4">
+<h4 id="orga046705"><span class="section-number-4">1.7.1</span> Getting and setting the last match</h4>
 <div class="outline-text-4" id="text-1-7-1">
 <p>
 In our core library we need a way to reach up to the caller and set
@@ -488,8 +488,8 @@ split the hooks for each call site if they take a binding.
 </p>
 </div>
 </div>
-<div id="outline-container-org4b51499" class="outline-4">
-<h4 id="org4b51499"><span class="section-number-4">1.7.2</span> Defining <code>$~</code> and setting the last match</h4>
+<div id="outline-container-org9ea7972" class="outline-4">
+<h4 id="org9ea7972"><span class="section-number-4">1.7.2</span> Defining <code>$~</code> and setting the last match</h4>
 <div class="outline-text-4" id="text-1-7-2">
 <p>
 With that in place <code>$~</code> can simply be defined as
@@ -510,8 +510,8 @@ happening and automatically mark methods to be split.
 </p>
 </div>
 </div>
-<div id="outline-container-orga6b5e02" class="outline-4">
-<h4 id="orga6b5e02"><span class="section-number-4">1.7.3</span> The other regexp variables</h4>
+<div id="outline-container-org3ff1c6f" class="outline-4">
+<h4 id="org3ff1c6f"><span class="section-number-4">1.7.3</span> The other regexp variables</h4>
 <div class="outline-text-4" id="text-1-7-3">
 <p>
 Most of the other variables connected with regular expressions are
@@ -537,8 +537,8 @@ the things that makes these variables extra special!
 </div>
 </div>
 </div>
-<div id="outline-container-orgdbe8f80" class="outline-3">
-<h3 id="orgdbe8f80"><span class="section-number-3">1.8</span> Testing performance</h3>
+<div id="outline-container-org13edaa8" class="outline-3">
+<h3 id="org13edaa8"><span class="section-number-3">1.8</span> Testing performance</h3>
 <div class="outline-text-3" id="text-1-8">
 <p>
 Let's check global variable reads and hooked variable reads are still
@@ -668,8 +668,8 @@ is 3 times slower with hooked variables.
 </p>
 </div>
 </div>
-<div id="outline-container-org7bd78d0" class="outline-3">
-<h3 id="org7bd78d0"><span class="section-number-3">1.9</span> What's left?</h3>
+<div id="outline-container-org9d01936" class="outline-3">
+<h3 id="org9d01936"><span class="section-number-3">1.9</span> What's left?</h3>
 <div class="outline-text-3" id="text-1-9">
 <p>
 After this work there's only two special bits of variable support left
@@ -702,8 +702,8 @@ reduced or eliminated, and we migth look at rewriting the storage for
 </p>
 </div>
 </div>
-<div id="outline-container-org69f58dc" class="outline-3">
-<h3 id="org69f58dc"><span class="section-number-3">1.10</span> Conclusion</h3>
+<div id="outline-container-orgd9a8adf" class="outline-3">
+<h3 id="orgd9a8adf"><span class="section-number-3">1.10</span> Conclusion</h3>
 <div class="outline-text-3" id="text-1-10">
 <p>
 TruffleRuby lets us implement more of Ruby in Ruby itself while still
