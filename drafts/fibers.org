@@ -12,7 +12,9 @@ scale beyond even MRI's.
 Everything I"m talking about here is based on early prototypes. The
 APIs and features may change radically before anything nears being
 production, and there is no fixed timetable for when these feature
-will arrive in a production JVM except, "When it's done."
+will arrive in a production JVM except, "When it's done." I
+contributed the support for Graal to Loom, and implemented the
+prototype we'll talk about here for TruffleRuby.
 * Lightweight threads, continuations, and Project Loom.
 Project Loom is an OpenJDK project with the goal
 #+BEGIN_QUOTE
@@ -202,7 +204,11 @@ def test_fiber_1(t)
   end
 end
 #+END_SRC
-Using this code I ran some tests to see how many fibres could be supported by different implementations.
+Using this code I ran some tests to see how many fibres could be
+supported by different implementations. This was done by making an
+initial guess and then performing a binary search to find the
+approximate number of fibres that could be supported with raising an
+error, or causing the VM to crash completely.
 | Ruby implementation         |  Fibres |
 |-----------------------------+---------|
 | MRI 2.4                     |   30000 |
