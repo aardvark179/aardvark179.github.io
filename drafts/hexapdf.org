@@ -44,3 +44,10 @@ But the situation can become slightly more complicated when the left hand side m
 a[i3] += 7
 #+END_SRC
 Will call =[]= on =a= with an argument of 3 to get the existing value, add 7 to it, call =[]== on =a= with arguments of 7 and the new value, and then return what? Some languages would say an assignment involving a method should return the result of that method, but Ruby returns the newly assigned value _no matter what the method returned_ We'd never noticed this because all of our core assignment methods where this had mattered did return the assigned value, but this wasn't the case in an LRU cache class in =HexaPDF=. It's good to have found this one.
+* Prpended modules
+* Refined modules, =Kernel#send=, and =Symbol#to_proc=
+* =Module#const_get= and autoloading
+* =Array#reject!= and throwing errors
+* String duplication and mutation
+* Too little time
+* String encoding
