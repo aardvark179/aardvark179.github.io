@@ -1,0 +1,46 @@
+A few weeks ago we got a [[https://github.com/oracle/truffleruby/issues/1391][bug report]] from [[https://github.com/gettalong][Thmoas Leitner]] that [[https://github.com/gettalong/hexapdf/][HexaPDF]] wasn't working on TruffleRuby. HexaPDF is a pure Ruby library for manipulating PDFs so any problems were clearly not to do with C extensions or anything like that. So what wa wrong? HexaPDF uses a lot of interesting Ruby features, and uses some in ways we don't see very often, so it turns out it be an excellent way to find lots of issues. Let's take a look at what we found and managed to fix.
+* Sorting arrays
+ The first bug we found was caused by a test of array sorting. Ruby doesn't guarantee exactly how your array will be sorted, except that it will be done by performing some number of comparisons between elements. On MRI this is really done by =qsort=, or a variant in the C runtime library, but in TruffleRuby we o it ourselves, and may change strategies depending on the size of the array. in the case of the test the array =[c, b, a]= had to be sorted into the array =[a, b, c]=, and on MRI this was donee as follows:
+#+BEGIN_EXAMPLE
+b <=> a --> [c, a, b]
+c <=> a --> [a, c, b]
+c <=> b --> [a, b, c]
+#+END_EXAMPLE
+On TruffleRuby however the comparisons were as follows:
+#+BEGIN_EXAMPLE
+b <=> c --> [b, c, a]
+a <=> b --> [a, c, b]
+b <=> c --> [a, b, c]
+#+END_EXAMPLE
+After discussing this we Thomas fixed the test [[https://github.com/gettalong/hexapdf/commit/46a3470ac5c3d87853f814bb7d388ec139e02dd3][here]]. THis sort of issue can come up surprisingly often when reimplementing languages, or even updating their standard libraries.
+* WeakRef
+=WeakRef= is the sort of class that always has some sort of tight coupling to the underlying language VM, so it's not surprising that our implementation was different from MRI's, but it wasn't meant to be quite as different as it turned out to be. It turns out we had two problems.
+
+The first problem was we had defined =WeakRef.new=, which meant any subclass of =WeakRef= wouldn't produce the expected class. Fixing this was a fairly simple case of moving our special allocation code to =WeakRef.__allocate__=.
+
+The second problem turned out to be that our =WeakRef= implementation was not a subclass of =Delegator= which meant it didn't provide several common methods such as equality checks. Equality checks on delegated objects are often a little fragile because you can easily find yourself in the following situation.
+#+BEGIN_SRC ruby
+A = Object.new
+B = Weakref.new(A)
+B == A # true
+A == B # false
+#+END_SRC 
+If you're careful however they will work.
+
+This was a slightly hard problem to refactor around. Our core code knew about the layout of a weak reference object and how to set and get the object. This meant =WeakRef= was always loaded whether you wanted it or not, but that wasn't a huge issue. Refactoring it to have the correct inheritance meant the core had to know about =Delegator= as well, so we either had to move that from the standard library to our core, or always load a stub which didn't implement any behaviour. Neither of those options sounded good so we went down a different route. We refactored our internal weak reference code to work on any object, we just use a hidden instance variable that cannot be accessed from Ruby. Now the core doesn't need to know anything about =WeakRef= objects, and they can be loaded when you =require 'weakref'= just like on MRI.
+
+Now we've got a more standard implementation of =WeakRef=, and moved more of our implementation to RUby.
+* The result of operator assignment
+The next problem we hit was the result of operator assignment. Many languages allow you to transform a statement like
+#+BEGIN_SRC ruby
+a = a + b
+#+END_SRC
+into
+#+BEGIN_SRC ruby
+a += b
+#+END_SRC
+But the situation can become slightly more complicated when the left hand side may include a method call. For example
+#+BEGIN_SRC
+a[i3] += 7
+#+END_SRC
+Will call =[]= on =a= with an argument of 3 to get the existing value, add 7 to it, call =[]== on =a= with arguments of 7 and the new value, and then return what? Some languages would say an assignment involving a method should return the result of that method, but Ruby returns the newly assigned value _no matter what the method returned_ We'd never noticed this because all of our core assignment methods where this had mattered did return the assigned value, but this wasn't the case in an LRU cache class in =HexaPDF=. It's good to have found this one.
