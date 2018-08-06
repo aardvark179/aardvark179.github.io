@@ -1,6 +1,19 @@
-A few weeks ago we got a [[https://github.com/oracle/truffleruby/issues/1391][bug report]] from [[https://github.com/gettalong][Thmoas Leitner]] that [[https://github.com/gettalong/hexapdf/][HexaPDF]] wasn't working on TruffleRuby. HexaPDF is a pure Ruby library for manipulating PDFs so any problems were clearly not to do with C extensions or anything like that. So what wa wrong? HexaPDF uses a lot of interesting Ruby features, and uses some in ways we don't see very often, so it turns out it be an excellent way to find lots of issues. Let's take a look at what we found and managed to fix.
+A few weeks ago we got a [[https://github.com/oracle/truffleruby/issues/1391][bug report]] from [[https://github.com/gettalong][Thmoas Leitner]] that [[https://github.com/gettalong/hexapdf/][HexaPDF]]
+wasn't working on TruffleRuby. HexaPDF is a pure Ruby library for
+manipulating PDFs so any problems were clearly not to do with C
+extensions or anything like that. So what wa wrong? HexaPDF uses a lot
+of interesting Ruby features, and uses some in ways we don't see very
+often, so it turns out it be an excellent way to find lots of
+issues. Let's take a look at what we found and managed to fix.
 * Sorting arrays
- The first bug we found was caused by a test of array sorting. Ruby doesn't guarantee exactly how your array will be sorted, except that it will be done by performing some number of comparisons between elements. On MRI this is really done by =qsort=, or a variant in the C runtime library, but in TruffleRuby we o it ourselves, and may change strategies depending on the size of the array. in the case of the test the array =[c, b, a]= had to be sorted into the array =[a, b, c]=, and on MRI this was donee as follows:
+ The first bug we found was caused by a test of array sorting. Ruby
+ doesn't guarantee exactly how your array will be sorted, except that
+ it will be done by performing some number of comparisons between
+ elements. On MRI this is really done by =qsort=, or a variant in the
+ C runtime library, but in TruffleRuby we o it ourselves, and may
+ change strategies depending on the size of the array. in the case of
+ the test the array =[c, b, a]= had to be sorted into the array =[a,
+ b, c]=, and on MRI this was donee as follows:
 #+BEGIN_EXAMPLE
 b <=> a --> [c, a, b]
 c <=> a --> [a, c, b]
@@ -12,13 +25,26 @@ b <=> c --> [b, c, a]
 a <=> b --> [a, c, b]
 b <=> c --> [a, b, c]
 #+END_EXAMPLE
-After discussing this we Thomas fixed the test [[https://github.com/gettalong/hexapdf/commit/46a3470ac5c3d87853f814bb7d388ec139e02dd3][here]]. THis sort of issue can come up surprisingly often when reimplementing languages, or even updating their standard libraries.
+After discussing this we Thomas fixed the test [[https://github.com/gettalong/hexapdf/commit/46a3470ac5c3d87853f814bb7d388ec139e02dd3][here]]. THis sort of
+issue can come up surprisingly often when reimplementing languages, or
+even updating their standard libraries.
 * WeakRef
-=WeakRef= is the sort of class that always has some sort of tight coupling to the underlying language VM, so it's not surprising that our implementation was different from MRI's, but it wasn't meant to be quite as different as it turned out to be. It turns out we had two problems.
+=WeakRef= is the sort of class that always has some sort of tight
+coupling to the underlying language VM, so it's not surprising that
+our implementation was different from MRI's, but it wasn't meant to be
+quite as different as it turned out to be. It turns out we had two
+problems.
 
-The first problem was we had defined =WeakRef.new=, which meant any subclass of =WeakRef= wouldn't produce the expected class. Fixing this was a fairly simple case of moving our special allocation code to =WeakRef.__allocate__=.
+The first problem was we had defined =WeakRef.new=, which meant any
+subclass of =WeakRef= wouldn't produce the expected class. Fixing this
+was a fairly simple case of moving our special allocation code to
+=WeakRef.__allocate__=.
 
-The second problem turned out to be that our =WeakRef= implementation was not a subclass of =Delegator= which meant it didn't provide several common methods such as equality checks. Equality checks on delegated objects are often a little fragile because you can easily find yourself in the following situation.
+The second problem turned out to be that our =WeakRef= implementation
+was not a subclass of =Delegator= which meant it didn't provide
+several common methods such as equality checks. Equality checks on
+delegated objects are often a little fragile because you can easily
+find yourself in the following situation.
 #+BEGIN_SRC ruby
 A = Object.new
 B = Weakref.new(A)
@@ -27,11 +53,25 @@ A == B # false
 #+END_SRC 
 If you're careful however they will work.
 
-This was a slightly hard problem to refactor around. Our core code knew about the layout of a weak reference object and how to set and get the object. This meant =WeakRef= was always loaded whether you wanted it or not, but that wasn't a huge issue. Refactoring it to have the correct inheritance meant the core had to know about =Delegator= as well, so we either had to move that from the standard library to our core, or always load a stub which didn't implement any behaviour. Neither of those options sounded good so we went down a different route. We refactored our internal weak reference code to work on any object, we just use a hidden instance variable that cannot be accessed from Ruby. Now the core doesn't need to know anything about =WeakRef= objects, and they can be loaded when you =require 'weakref'= just like on MRI.
+This was a slightly hard problem to refactor around. Our core code
+knew about the layout of a weak reference object and how to set and
+get the object. This meant =WeakRef= was always loaded whether you
+wanted it or not, but that wasn't a huge issue. Refactoring it to have
+the correct inheritance meant the core had to know about =Delegator=
+as well, so we either had to move that from the standard library to
+our core, or always load a stub which didn't implement any
+behaviour. Neither of those options sounded good so we went down a
+different route. We refactored our internal weak reference code to
+work on any object, we just use a hidden instance variable that cannot
+be accessed from Ruby. Now the core doesn't need to know anything
+about =WeakRef= objects, and they can be loaded when you =require
+'weakref'= just like on MRI.
 
-Now we've got a more standard implementation of =WeakRef=, and moved more of our implementation to RUby.
+Now we've got a more standard implementation of =WeakRef=, and moved
+more of our implementation to RUby.
 * The result of operator assignment
-The next problem we hit was the result of operator assignment. Many languages allow you to transform a statement like
+The next problem we hit was the result of operator assignment. Many
+languages allow you to transform a statement like
 #+BEGIN_SRC ruby
 a = a + b
 #+END_SRC
@@ -39,25 +79,66 @@ into
 #+BEGIN_SRC ruby
 a += b
 #+END_SRC
-But the situation can become slightly more complicated when the left hand side may include a method call. For example
+But the situation can become slightly more complicated when the left
+hand side may include a method call. For example
 #+BEGIN_SRC
 a[i3] += 7
 #+END_SRC
-Will call =[]= on =a= with an argument of 3 to get the existing value, add 7 to it, call =[]== on =a= with arguments of 7 and the new value, and then return what? Some languages would say an assignment involving a method should return the result of that method, but Ruby returns the newly assigned value _no matter what the method returned_ We'd never noticed this because all of our core assignment methods where this had mattered did return the assigned value, but this wasn't the case in an LRU cache class in =HexaPDF=. It's good to have found this one.
+Will call =[]= on =a= with an argument of 3 to get the existing value,
+add 7 to it, call =[]== on =a= with arguments of 7 and the new value,
+and then return what? Some languages would say an assignment involving
+a method should return the result of that method, but Ruby returns the
+newly assigned value _no matter what the method returned_ We'd never
+noticed this because all of our core assignment methods where this had
+mattered did return the assigned value, but this wasn't the case in an
+LRU cache class in =HexaPDF=. It's good to have found this one.
 * Prpended modules
-Inheritance in Ruby can be bit complex, and although we did do the right thing when looking up methods but constants didn't work. Not a complex fix, but it wasn't something we had a test for.
+Inheritance in Ruby can be bit complex, and although we did do the
+right thing when looking up methods but constants didn't work. Not a
+complex fix, but it wasn't something we had a test for.
 * Refined modules, =Kernel#send=, and =Symbol#to_proc=
-Refined modules are another complex area of Ruby to get right. =Kernel#send= is meant to take account of of the refinements active in its caller's context, and we didn't do that. Fixing this is a slightly evil
+Refined modules are another complex area of Ruby to get
+right. =Kernel#send= is meant to take account of of the refinements
+active in its caller's context, and we didn't do that. Fixing this is
+a slightly evil
 * =Module#const_get= and autoloading
-Autoloading in Ruby can be complex. Autoloading a single constant may cause quite a lot to happen, including fundamentally changing the chain of modules leading to that constant if it is scoped, i.e. has a qualified name relative to the current module root module. The right way to do this and match MRI is to resolve each component in turn, performing any autoloading required. This was complex to get right in our core Java code so we moved the complex logic to Ruby and only left the simple cases inn our core. 
+Autoloading in Ruby can be complex. Autoloading a single constant may
+cause quite a lot to happen, including fundamentally changing the
+chain of modules leading to that constant if it is scoped, i.e. has a
+qualified name relative to the current module root module. The right
+way to do this and match MRI is to resolve each component in turn,
+performing any autoloading required. This was complex to get right in
+our core Java code so we moved the complex logic to Ruby and only left
+the simple cases inn our core.
 * =Array#reject!= and throwing errors
-=Array#rejects!= calls a block passed to with each element of the array, and removes any for which that block returns true. Sounds simple doesn't it? Well it would be if you really did all the work to remove an element as soon as the block told you to, and the ruby documentation strongly suggests that this is what MRI does.
+=Array#rejects!= calls a block passed to with each element of the
+array, and removes any for which that block returns true. Sounds
+simple doesn't it? Well it would be if you really did all the work to
+remove an element as soon as the block told you to, and the ruby
+documentation strongly suggests that this is what MRI does.
 #+BEGIN_QUOTE
 Ruby docs quote here.
 #+END_QUOTE
-DOn't be fooled though as the Ruby documentation doesn't always tell the truth. A good way to do this is to visit each element of the array in turn, and move each to its final position if that is different from it current one. Then when all the elements have been processed we clear any elements in the storage that are no longer part of the array and update the length of the array. What happens though if the block raises an exception, throws to a catch block, or does something else which would cause =Array#reject= to exit exceptionally? Well, the step we forgot was to move any remaining unprocessed array elements to their final positions before blanking the remaining space. The result was that we erroneously truncated arrays in certain cases.
+DOn't be fooled though as the Ruby documentation doesn't always tell
+the truth. A good way to do this is to visit each element of the array
+in turn, and move each to its final position if that is different from
+it current one. Then when all the elements have been processed we
+clear any elements in the storage that are no longer part of the array
+and update the length of the array. What happens though if the block
+raises an exception, throws to a catch block, or does something else
+which would cause =Array#reject= to exit exceptionally? Well, the step
+we forgot was to move any remaining unprocessed array elements to
+their final positions before blanking the remaining space. The result
+was that we erroneously truncated arrays in certain cases.
 
-Array reject is an interesting example of partially lazy data structure modification. Ruby uses a bit of this on other array methods such as =shift=, and we've implemented techniques to match MRI's performance characteristic for these methods because there is some important code out there which depends on them, but there is some very interesting theoretical work lazy data structures and combining multiple operations to reduce the total cost, so this is an area we might revisit in the future.
+Array reject is an interesting example of partially lazy data
+structure modification. Ruby uses a bit of this on other array methods
+such as =shift=, and we've implemented techniques to match MRI's
+performance characteristic for these methods because there is some
+important code out there which depends on them, but there is some very
+interesting theoretical work lazy data structures and combining
+multiple operations to reduce the total cost, so this is an area we
+might revisit in the future.
 * String duplication and mutation
 Native strings, duplication, and mutation.
 * Too little time
