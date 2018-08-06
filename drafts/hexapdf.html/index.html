@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html lang="en-us">
+<head>
+  <title>Untitled - aardvark179.github.io</title>
+  <meta charset="utf-8" />
+  <meta name="author" content="" />
+
+  <link rel="alternate" title="RSS Feed" href="/rss.xml" type="application/rss+xml">
+  <link rel="stylesheet" href="/media/css/main.css" type="text/css">
+  <link rel="stylesheet" href="/media/css/posts.css" type="text/css">
+
+  <script src="https://ajax.googleapis.com/ajax/libs/jquery/1.11.0/jquery.min.js"></script>
+  <script src="http://netdna.bootstrapcdn.com/bootstrap/3.1.1/js/bootstrap.min.js"></script>
+</head>
+
+  <body class="container">
+<header id="header">
+    <body>
+        <nav class="navbar navbar-default navbar-fixed-top" style="opacity: .9" role="navigation">
+            <div class="container-fluid">
+                <div class="navbar-header">
+                    <button type="button" class="navbar-toggle" data-toggle="collapse" data-target="#bs-example-navbar-collapse-1">
+                        <span class="sr-only">Toggle navigation</span>
+                        <span class="icon-bar"></span>
+                        <span class="icon-bar"></span>
+                        <span class="icon-bar"></span>
+                    </button>
+                    <a class="navbar-brand" href="/">aardvark179.github.io</a>
+                </div>
+                <div class="collapse navbar-collapse" id="bs-example-navbar-collapse-1">
+                    <ul class="nav navbar-nav navbar-right">
+                            <li class="active"><a href="/blog/">Blog</a></li>
+                        <li><a href="/tags/">Tags</a></li>
+                        <li><a href="/about/">About</a></li>
+                        <li><a href="https://github.com/aardvark179">GitHub</a></li>
+                        <li><a href="/rss.xml">RSS</a></li>
+                    </ul>
+                </div>
+            </div>
+        </nav>
+    </body>
+</header>
+
+<section id="content" role="main">
+    <div id="outline-container-sec-" class="row" style="padding-top: 70px">
+        <div class="col-md-2"></div>
+            <h1>Untitled</h1>
+            <div id="table-of-contents">
+<h2>Table of Contents</h2>
+<div id="text-table-of-contents">
+<ul>
+<li><a href="#org817e867">1. Sorting arrays</a></li>
+<li><a href="#org5a19f74">2. WeakRef</a></li>
+<li><a href="#org6b4a08d">3. The result of operator assignment</a></li>
+<li><a href="#org767de0c">4. Prepended modules</a></li>
+<li><a href="#org72e8931">5. Refined modules, <code>Kernel#send</code>, and <code>Symbol#to_proc</code></a></li>
+<li><a href="#org4ee5f9a">6. <code>Module#const_get</code> and autoloading</a></li>
+<li><a href="#org5551caa">7. <code>Array#reject!</code> and throwing errors</a></li>
+<li><a href="#orgd09f7b3">8. String duplication and mutation</a></li>
+<li><a href="#org8b31113">9. Too little time</a></li>
+<li><a href="#orgad05a8e">10. String encoding</a></li>
+</ul>
+</div>
+</div>
+<p>
+A few weeks ago we got a <a href="https://github.com/oracle/truffleruby/issues/1391">bug report</a> from <a href="https://github.com/gettalong">Thmoas Leitner</a> that <a href="https://github.com/gettalong/hexapdf/">HexaPDF</a>
+wasn't working on TruffleRuby. HexaPDF is a pure Ruby library for
+manipulating PDFs so any problems were clearly not to do with C
+extensions or anything like that. So what wa wrong? HexaPDF uses a lot
+of interesting Ruby features, and uses some in ways we don't see very
+often, so it turns out it be an excellent way to find lots of
+issues. Let's take a look at what we found and managed to fix.
+</p>
+<div id="outline-container-org817e867" class="outline-2">
+<h2 id="org817e867"><span class="section-number-2">1</span> Sorting arrays</h2>
+<div class="outline-text-2" id="text-1">
+<p>
+The first bug we found was caused by a test of array sorting. Ruby
+doesn't guarantee exactly how your array will be sorted, except that
+it will be done by performing some number of comparisons between
+elements. On MRI this is really done by <code>qsort</code>, or a variant in the
+C runtime library, but in TruffleRuby we o it ourselves, and may
+change strategies depending on the size of the array. in the case of
+the test the array <code>[c, b, a]</code> had to be sorted into the array <code>[a,
+ b, c]</code>, and on MRI this was donee as follows:
+</p>
+<pre class="example">
+b &lt;=&gt; a --&gt; [c, a, b]
+c &lt;=&gt; a --&gt; [a, c, b]
+c &lt;=&gt; b --&gt; [a, b, c]
+</pre>
+<p>
+On TruffleRuby however the comparisons were as follows:
+</p>
+<pre class="example">
+b &lt;=&gt; c --&gt; [b, c, a]
+a &lt;=&gt; b --&gt; [a, c, b]
+b &lt;=&gt; c --&gt; [a, b, c]
+</pre>
+<p>
+After discussing this we Thomas fixed the test <a href="https://github.com/gettalong/hexapdf/commit/46a3470ac5c3d87853f814bb7d388ec139e02dd3">here</a>. THis sort of
+issue can come up surprisingly often when reimplementing languages, or
+even updating their standard libraries.
+</p>
+</div>
+</div>
+<div id="outline-container-org5a19f74" class="outline-2">
+<h2 id="org5a19f74"><span class="section-number-2">2</span> WeakRef</h2>
+<div class="outline-text-2" id="text-2">
+<p>
+<code>WeakRef</code> is the sort of class that always has some sort of tight
+coupling to the underlying language VM, so it's not surprising that
+our implementation was different from MRI's, but it wasn't meant to be
+quite as different as it turned out to be. It turns out we had two
+problems.
+</p>
+
+<p>
+The first problem was we had defined <code>WeakRef.new</code>, which meant any
+subclass of <code>WeakRef</code> wouldn't produce the expected class. Fixing this
+was a fairly simple case of moving our special allocation code to
+<code>WeakRef.__allocate__</code>.
+</p>
+
+<p>
+The second problem turned out to be that our <code>WeakRef</code> implementation
+was not a subclass of <code>Delegator</code> which meant it didn't provide
+several common methods such as equality checks. Equality checks on
+delegated objects are often a little fragile because you can easily
+find yourself in the following situation.
+</p>
+<div class="org-src-container">
+<pre class="src src-ruby">A = Object.new
+B = Weakref.new(A)
+B == A # true
+A == B # false
+</pre>
+</div>
+<p>
+If you're careful however they will work.
+</p>
+
+<p>
+This was a slightly hard problem to refactor around. Our core code
+knew about the layout of a weak reference object and how to set and
+get the object. This meant <code>WeakRef</code> was always loaded whether you
+wanted it or not, but that wasn't a huge issue. Refactoring it to have
+the correct inheritance meant the core had to know about <code>Delegator</code>
+as well, so we either had to move that from the standard library to
+our core, or always load a stub which didn't implement any
+behaviour. Neither of those options sounded good so we went down a
+different route. We refactored our internal weak reference code to
+work on any object, we just use a hidden instance variable that cannot
+be accessed from Ruby. Now the core doesn't need to know anything
+about <code>WeakRef</code> objects, and they can be loaded when you <code>require
+'weakref'</code> just like on MRI.
+</p>
+
+<p>
+Now we've got a more standard implementation of <code>WeakRef</code>, and moved
+more of our implementation to Ruby.
+</p>
+</div>
+</div>
+<div id="outline-container-org6b4a08d" class="outline-2">
+<h2 id="org6b4a08d"><span class="section-number-2">3</span> The result of operator assignment</h2>
+<div class="outline-text-2" id="text-3">
+<p>
+The next problem we hit was the result of operator assignment. Many
+languages allow you to transform a statement like
+</p>
+<div class="org-src-container">
+<pre class="src src-ruby">a = a + b
+</pre>
+</div>
+<p>
+into
+</p>
+<div class="org-src-container">
+<pre class="src src-ruby">a += b
+</pre>
+</div>
+<p>
+But the situation can become slightly more complicated when the left
+hand side may include a method call. For example
+</p>
+<pre class="example">
+a[i3] += 7
+</pre>
+<p>
+Will call <code>[]</code> on <code>a</code> with an argument of 3 to get the existing value,
+add 7 to it, call <code>[]=</code> on <code>a</code> with arguments of 7 and the new value,
+and then return what? Some languages would say an assignment involving
+a method should return the result of that method, but Ruby returns the
+newly assigned value <span class="underline">no matter what the method returned</span> We'd never
+noticed this because all of our core assignment methods where this had
+mattered did return the assigned value, but this wasn't the case in an
+LRU cache class in <code>HexaPDF</code>. It's good to have found this one.
+</p>
+</div>
+</div>
+<div id="outline-container-org767de0c" class="outline-2">
+<h2 id="org767de0c"><span class="section-number-2">4</span> Prepended modules</h2>
+<div class="outline-text-2" id="text-4">
+<p>
+Inheritance in Ruby can be bit complex, and although we did do the
+right thing when looking up methods but constants didn't work. Not a
+complex fix, but it wasn't something we had a test for.
+</p>
+</div>
+</div>
+<div id="outline-container-org72e8931" class="outline-2">
+<h2 id="org72e8931"><span class="section-number-2">5</span> Refined modules, <code>Kernel#send</code>, and <code>Symbol#to_proc</code></h2>
+<div class="outline-text-2" id="text-5">
+<p>
+Refined modules are another complex area of Ruby to get
+right. <code>Kernel#send</code> is meant to take account of of the refinements
+active in its caller's context, and we didn't do that. Fixing this is
+a slightly evil
+</p>
+</div>
+</div>
+<div id="outline-container-org4ee5f9a" class="outline-2">
+<h2 id="org4ee5f9a"><span class="section-number-2">6</span> <code>Module#const_get</code> and autoloading</h2>
+<div class="outline-text-2" id="text-6">
+<p>
+Autoloading in Ruby can be complex. Autoloading a single constant may
+cause quite a lot to happen, including fundamentally changing the
+chain of modules leading to that constant if it is scoped, i.e. has a
+qualified name relative to the current module root module. The right
+way to do this and match MRI is to resolve each component in turn,
+performing any autoloading required. This was complex to get right in
+our core Java code so we moved the complex logic to Ruby and only left
+the simple cases inn our core.
+</p>
+</div>
+</div>
+<div id="outline-container-org5551caa" class="outline-2">
+<h2 id="org5551caa"><span class="section-number-2">7</span> <code>Array#reject!</code> and throwing errors</h2>
+<div class="outline-text-2" id="text-7">
+<p>
+<code>Array#rejects!</code> calls a block passed to with each element of the
+array, and removes any for which that block returns true. Sounds
+simple doesn't it? Well it would be if you really did all the work to
+remove an element as soon as the block told you to, and the ruby
+documentation at 2.2 strongly suggests that this is what MRI does.
+</p>
+<blockquote>
+<p>
+The array is changed instantly every time the block is called, not
+after the iteration is over.
+</p>
+</blockquote>
+<p>
+Don't be fooled though as the Ruby documentation doesn't always tell
+the truth, and at 2.3 it had changed to the following: 
+</p>
+<blockquote>
+<p>
+The array may not be changed instantly every time the block is called.
+</p>
+</blockquote>
+<p>
+A good way to do this reasonably efficiently is to visit each element
+of the array in turn, and move each to its final position if that is
+different from it current one. Then when all the elements have been
+processed we clear any elements in the storage that are no longer part
+of the array and update the length of the array. What happens though
+if the block raises an exception, throws to a catch block, or does
+something else which would cause <code>Array#reject</code> to exit exceptionally?
+Well, the step we forgot was to move any remaining unprocessed array
+elements to their final positions before blanking the remaining
+space. The result was that we erroneously truncated arrays in certain
+cases.
+</p>
+
+<p>
+Array reject is an interesting example of partially lazy data
+structure modification. Ruby uses a bit of this on other array methods
+such as <code>shift</code>, and we've implemented techniques to match MRI's
+performance characteristic for these methods because there is some
+important code out there which depends on them, but there is some very
+interesting theoretical work lazy data structures and combining
+multiple operations to reduce the total cost, so this is an area we
+might revisit in the future.
+</p>
+</div>
+</div>
+<div id="outline-container-orgd09f7b3" class="outline-2">
+<h2 id="orgd09f7b3"><span class="section-number-2">8</span> String duplication and mutation</h2>
+<div class="outline-text-2" id="text-8">
+<p>
+Native strings, duplication, and mutation.
+</p>
+</div>
+</div>
+<div id="outline-container-org8b31113" class="outline-2">
+<h2 id="org8b31113"><span class="section-number-2">9</span> Too little time</h2>
+</div>
+<div id="outline-container-orgad05a8e" class="outline-2">
+<h2 id="orgad05a8e"><span class="section-number-2">10</span> String encoding</h2>
+</div>
+
+    </div>
+</section>
+
+
+<footer class="footer">
+    <p>Generated by <a href="http://www.gnu.org/software/emacs/">Emacs</a> 26.x (<a href="http://orgmode.org">Org mode</a> 9.x)</p>
+    <p>
+        Copyright &copy; 2012 - <span id="footerYear"></span> <a href="mailto:duncan &lt;at&gt; duncan-linux"></a>
+        &nbsp;&nbsp;-&nbsp;&nbsp;
+        Powered by <a href="https://github.com/kelvinh/org-page" target="_blank">org-page</a>
+        <script type="text/javascript">document.getElementById("footerYear").innerHTML = (new Date()).getFullYear();</script>
+    </p>
+</footer>
+
+  </body>
+</html>
