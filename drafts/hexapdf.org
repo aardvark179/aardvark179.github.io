@@ -68,7 +68,7 @@ about =WeakRef= objects, and they can be loaded when you =require
 'weakref'= just like on MRI.
 
 Now we've got a more standard implementation of =WeakRef=, and moved
-more of our implementation to RUby.
+more of our implementation to Ruby.
 * The result of operator assignment
 The next problem we hit was the result of operator assignment. Many
 languages allow you to transform a statement like
