@@ -4,7 +4,10 @@ manipulating PDFs so any problems were clearly not to do with C
 extensions or anything like that. So what wa wrong? HexaPDF uses a lot
 of interesting Ruby features, and uses some in ways we don't see very
 often, so it turns out it be an excellent way to find lots of
-issues. Let's take a look at what we found and managed to fix.
+issues. We've got some good debugging tools for TruffleRuby, but when
+you need to compare multiple Ruby implementations it's usually easier
+to use classic =printf= debugging and compare the results. Let's take a
+look at what we found and managed to fix.
 * Sorting arrays
  The first bug we found was caused by a test of array sorting. Ruby
  doesn't guarantee exactly how your array will be sorted, except that
@@ -160,6 +163,16 @@ interesting theoretical work lazy data structures and combining
 multiple operations to reduce the total cost, so this is an area we
 might revisit in the future.
 * String duplication and mutation
-Native strings, duplication, and mutation.
+Strings in many languages are immutable, but this isn't true in
+Ruby. Most of the time however strings aren't mutated, or only in well
+understood ways, so we represent them using immutable ropes whenever
+possible. The result of this is that copying a string is very cheap as
+they can share the same underlying rope.
+
+When you interact with a C extension however, or call into native
+code, then the strings can be much more mutable, so we which
+strategies to a mutable rope. Sadly we didn't duplicate that rope
+along with the string so mutating the copy mutated the original as
+well.
 * Too little time
 * String encoding
