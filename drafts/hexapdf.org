@@ -70,7 +70,7 @@ about =WeakRef= objects, and they can be loaded when you =require
 Now we've got a more standard implementation of =WeakRef=, and moved
 more of our implementation to Ruby.
 * The result of operator assignment
-The next problem we hit was the result of operator assignment. Many
+The next problem we found was the result of operator assignments. Many
 languages allow you to transform a statement like
 #+BEGIN_SRC ruby
 a = a + b
@@ -82,40 +82,54 @@ a += b
 But the situation can become slightly more complicated when the left
 hand side may include a method call. For example
 #+BEGIN_SRC
-a[i3] += 7
+a[3] += 7
 #+END_SRC
 Will call =[]= on =a= with an argument of 3 to get the existing value,
-add 7 to it, call =[]== on =a= with arguments of 7 and the new value,
+add 7 to it, call =[]== on =a= with arguments of 3 and the new value,
 and then return what? Some languages would say an assignment involving
 a method should return the result of that method, but Ruby returns the
-newly assigned value _no matter what the method returned_ We'd never
+newly assigned value _no matter what the method returned_. We'd never
 noticed this because all of our core assignment methods where this had
 mattered did return the assigned value, but this wasn't the case in an
 LRU cache class in =HexaPDF=. It's good to have found this one.
-* Prepended modules
-Inheritance in Ruby can be bit complex, and although we did do the
-right thing when looking up methods but constants didn't work. Not a
-complex fix, but it wasn't something we had a test for.
+* Prepended modules and constants
+Inheritance in Ruby can be bit complex, but it can be flattened down
+to a list of classes that specifiy the order in which you should look
+at ancestors. So, you check for a method or constant on the original
+class, and then loop over that chain of ancestors, remembering to skip
+over the original class. We got this right when looking up methods,
+but for constants there was an assumption in the original code that
+the original class was first in the ancestor chain, and that's not
+true if you prepend a module.
+
+We did a little refactoring to fix that and now constant lookups
+should work correctly.
 * Refined modules, =Kernel#send=, and =Symbol#to_proc=
-Refined modules are another complex area of Ruby to get
-right. =Kernel#send= is meant to take account of of the refinements
-active in its caller's context, and we didn't do that. Fixing this is
-a slightly evil
+Refined modules are another complex area of Ruby to get right, and
+we've had a couple of bug reports about them
+recently. =Symbol#to_proc= is meant to take account of the refinements
+active in its caller's context, and we didn't do that. Fixing this
+requires getting the declaration context from the caller. Luckily we
+can optimise fetching values from a caller very well, and it only
+needed a small fix for this to work. =Kernel#send= behaves in a
+similar way, so we fixed that at the same time.
 * =Module#const_get= and autoloading
-Autoloading in Ruby can be complex. Autoloading a single constant may
-cause quite a lot to happen, including fundamentally changing the
-chain of modules leading to that constant if it is scoped, i.e. has a
-qualified name relative to the current module root module. The right
-way to do this and match MRI is to resolve each component in turn,
-performing any autoloading required. This was complex to get right in
+TO finish off our little trilogy of complex Ruby features we hadn't
+implemented correct we found an issue with autoloading
+constants. Resolving a single constant may cause quite a lot to
+happen, including fundamentally changing the chain of modules leading
+to that constant if it is scoped, i.e. has a qualified name relative
+to the current module or the root module. The right way to do this and
+match MRI is to resolve each component in turn, performing any
+autoloading required at each step. This was complex to get right in
 our core Java code so we moved the complex logic to Ruby and only left
-the simple cases inn our core.
+the simple cases in our core.
 * =Array#reject!= and throwing errors
-=Array#rejects!= calls a block passed to with each element of the
-array, and removes any for which that block returns true. Sounds
-simple doesn't it? Well it would be if you really did all the work to
-remove an element as soon as the block told you to, and the ruby
-documentation at 2.2 strongly suggests that this is what MRI does.
+=Array#rejects!= calls a block with each element of the array, and
+removes any for which that block returns true. Sounds simple doesn't
+it? Well it would be if you really did all the work to remove an
+element as soon as the block told you to, and the ruby documentation
+at 2.2 strongly suggests that this is what MRI does.
 #+BEGIN_QUOTE
 The array is changed instantly every time the block is called, not
 after the iteration is over.
