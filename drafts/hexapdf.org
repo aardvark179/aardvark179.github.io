@@ -175,4 +175,21 @@ strategies to a mutable rope. Sadly we didn't duplicate that rope
 along with the string so mutating the copy mutated the original as
 well.
 * Too little time
+Why would time be an issue with processing PDFs? Well, a PDF file can
+contain fonts, and those fonts can contain meta data such as creating
+or modification dates. In TruffleRuby we currently use
+=java.time.ZoneDateTime= for our time representation, and this has a
+range defined by =java.time.Instant= of '-1000000000-01-01T00:00Z' to
+'1000000000-12-31T23:59:59.999999999Z'. This covers a range of about 2
+billion years, which should be enough for anybody right?
+
+Well, True Type files internally represent times as a signed 64 bit
+integer which is the number of seconds relative to an epoch of 12:00
+midnight, January 1, 1904. This corresponds to a range of almost 600
+billion years round the epoch. It's similar to the standard Unix 64
+bit =time_t= but since it has a slightly different epoch date doesn't
+even map neatly to that!
+
+MRI actually supports dates over an incredibly wide range and allows
+the time to be a =Rational= or a =BigDecimal=
 * String encoding
