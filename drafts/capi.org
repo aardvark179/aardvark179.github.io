@@ -33,7 +33,7 @@ by Sulong, but fails if those objects have to be passed to a native
 shared library or stored on the native heap. To solve that problem we
 would patch C extensions in too ways.
 ** Managed memory
-The first way to avoid problems with thetranslation of Ruby objects to
+The first way to avoid problems with the translation of Ruby objects to
 native pointers is to avoid doing as much as possible. By default we'd
 replace every array of ~VALUE~ objects (which would be stored on the
 native heap) with a managed object that could store the object without
@@ -83,7 +83,7 @@ garbage collector traverses all the objects in your Ruby heap it calls
 these custom mark functions and the objects will be marked as live as
 long as the owners are. There's just one problem, we don't have a GC
 which can call custom mark functions, we have to work with any GC on
-the JVM. We also can't change the GC to look for native poitners on
+the JVM. We also can't change the GC to look for native pointers on
 the stack which should also keep their respective objects alive.
 ** Periodic marking
 We can solve this by keeping two lists of objects that need to be kept
@@ -111,7 +111,7 @@ There are however still some fundamental differences between us and
 MRI, but they are much smaller than they were. One is that our ~VALUE~
 type is a ~void *~ in C. This means we can't do a switch on a
 ~VALUE~. We will experiment with using ~long~ for ~VALUE~, but this
-may equire some changes to Sulong for support.
+may require some changes to Sulong for support.
 
 We also can't yet translate a pointer to a Ruby array's contents to
 native. This requires storing the contents in native memory so that
