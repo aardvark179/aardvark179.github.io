@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="en-us">
+<head>
+  <title>Better support for C extensions in TruffleRuby. - aardvark179.github.io</title>
+  <meta charset="utf-8" />
+  <meta name="author" content="" />
+
+  <link rel="alternate" title="RSS Feed" href="/rss.xml" type="application/rss+xml">
+  <link rel="stylesheet" href="/media/css/main.css" type="text/css">
+  <link rel="stylesheet" href="/media/css/posts.css" type="text/css">
+
+  <script src="https://ajax.googleapis.com/ajax/libs/jquery/1.11.0/jquery.min.js"></script>
+  <script src="http://netdna.bootstrapcdn.com/bootstrap/3.1.1/js/bootstrap.min.js"></script>
+</head>
+
+  <body class="container">
+<header id="header">
+    <body>
+        <nav class="navbar navbar-default navbar-fixed-top" style="opacity: .9" role="navigation">
+            <div class="container-fluid">
+                <div class="navbar-header">
+                    <button type="button" class="navbar-toggle" data-toggle="collapse" data-target="#bs-example-navbar-collapse-1">
+                        <span class="sr-only">Toggle navigation</span>
+                        <span class="icon-bar"></span>
+                        <span class="icon-bar"></span>
+                        <span class="icon-bar"></span>
+                    </button>
+                    <a class="navbar-brand" href="/">aardvark179.github.io</a>
+                </div>
+                <div class="collapse navbar-collapse" id="bs-example-navbar-collapse-1">
+                    <ul class="nav navbar-nav navbar-right">
+                            <li class="active"><a href="/blog/">Blog</a></li>
+                        <li><a href="/tags/">Tags</a></li>
+                        <li><a href="/about/">About</a></li>
+                        <li><a href="https://github.com/aardvark179">GitHub</a></li>
+                        <li><a href="/rss.xml">RSS</a></li>
+                    </ul>
+                </div>
+            </div>
+        </nav>
+    </body>
+</header>
+
+<section id="content" role="main">
+    <div id="outline-container-sec-" class="row" style="padding-top: 70px">
+        <div class="col-md-2"></div>
+            <h1>Better support for C extensions in TruffleRuby.</h1>
+            <div id="table-of-contents">
+<h2>Table of Contents</h2>
+<div id="text-table-of-contents">
+<ul>
+<li><a href="#orgc2c5638">1. Interactions between Truffle languages</a></li>
+<li><a href="#orgf5af4b9">2. C extensions the old way</a>
+<ul>
+<li><a href="#org58d5c31">2.1. Managed memory</a></li>
+<li><a href="#org7651c06">2.2. Handles everywhere</a></li>
+</ul>
+</li>
+<li><a href="#orgcfa0dcd">3. C extensions the new way</a>
+<ul>
+<li><a href="#orgd6e870d">3.1. Wrapping and unwrapping</a></li>
+<li><a href="#org084a9f6">3.2. Tidying up wrappers</a></li>
+<li><a href="#orgcab440d">3.3. Keeping objects alive in MRI</a></li>
+<li><a href="#orgde65e21">3.4. Periodic marking</a></li>
+</ul>
+</li>
+<li><a href="#orgc92a09b">4. Improved compatibility and remaining differences</a></li>
+</ul>
+</div>
+</div>
+<p>
+We've been able to support C extensions in TruffleRuby for a long time
+now, but we've always had to patch them while building the C for them
+to work. We've just added much better support which almost completely
+removes the need to patch extensions. In this article I'll explain how
+Truffle based languages can support polyglot calls, how C extensions
+used to work in TruffleRuby, how they now work, and what the remaining
+differences are with MRI.
+</p>
+<div id="outline-container-orgc2c5638" class="outline-2">
+<h2 id="orgc2c5638"><span class="section-number-2">1</span> Interactions between Truffle languages</h2>
+<div class="outline-text-2" id="text-1">
+<p>
+All Truffle languages can provide support for other languages to
+access data and make calls by defining how foreign access is
+resolved. This covers things like asking if an object is executable,
+or has a size, reading and writing public accessible fields, and so
+forth. So JavaScript can easily call methods on a Ruby object, or
+access members of a Ruby array as long we we provide foreign access
+for Ruby objects.
+</p>
+
+<p>
+There is also support for lower level concepts in the foreign access
+APIs.  You can convert an object to a native representation, as well
+as checking whether that object can behave like a pointer.
+</p>
+
+<p>
+These facilities don't cover everything though, so Sulong provides a
+set of functions for converting almsot any object into a native handle
+and back again. I say almost any object because boxed primitives such
+as <code>java.lang.Integer</code> are not supported, but you can always arrange
+to wrap these to avoid the problem.
+</p>
+</div>
+</div>
+<div id="outline-container-orgf5af4b9" class="outline-2">
+<h2 id="orgf5af4b9"><span class="section-number-2">2</span> C extensions the old way</h2>
+<div class="outline-text-2" id="text-2">
+<p>
+We used Truffle's polyglot features to call C functions from Ruby, and
+Ruby methods from C, without touching the arguments at all. This
+allowed Ruby objects to pass easily through C code that is interpreted
+by Sulong, but fails if those objects have to be passed to a native
+shared library or stored on the native heap. To solve that problem we
+would patch C extensions in too ways.
+</p>
+</div>
+<div id="outline-container-org58d5c31" class="outline-3">
+<h3 id="org58d5c31"><span class="section-number-3">2.1</span> Managed memory</h3>
+<div class="outline-text-3" id="text-2-1">
+<p>
+The first way to avoid problems with thetranslation of Ruby objects to
+native pointers is to avoid doing as much as possible. By default we'd
+replace every array of <code>VALUE</code> objects (which would be stored on the
+native heap) with a managed object that could store the object without
+conversion. We could also allocate managed structs instead of native
+one, but this became complicated with complex structures which had
+nested members of fused arrays.
+</p>
+</div>
+</div>
+<div id="outline-container-org7651c06" class="outline-3">
+<h3 id="org7651c06"><span class="section-number-3">2.2</span> Handles everywhere</h3>
+<div class="outline-text-3" id="text-2-2">
+<p>
+The second way to solve these problems was to use the functions Sulong
+provided to convert between managed objects and native handles. These
+functions were hard to use without introducing memory leaks however,
+and did require that we patched every point at which a Ruby object
+needed to be converted to or from native memory.
+</p>
+</div>
+</div>
+</div>
+<div id="outline-container-orgcfa0dcd" class="outline-2">
+<h2 id="orgcfa0dcd"><span class="section-number-2">3</span> C extensions the new way</h2>
+<div class="outline-text-2" id="text-3">
+<p>
+Our previous approach was enough to get several key C extensions
+working, but sometimes they required large patches, and avoiding
+resource leaks was tricky. We prototyped several approaches, either
+making as many parts as possible managed objects to avoid conversion,
+or allowing all Ruby objects to be converted to native pointers, but
+both these approaches had issues. So we tried a third approach,
+wrapping every Ruby object.
+</p>
+</div>
+<div id="outline-container-orgd6e870d" class="outline-3">
+<h3 id="orgd6e870d"><span class="section-number-3">3.1</span> Wrapping and unwrapping</h3>
+<div class="outline-text-3" id="text-3-1">
+<p>
+The idea is fairly simple. C extensions will never see raw Ruby
+object, they will only ever see wrappers that know how to convert
+themselves to native pointers, and at every point where a Ruby object
+needs to be extracted from a wrapper we know there should only ever be
+a wrapper or a native pointer. This makes it easy to convert back from
+a native pointer to a wrapper. Best of all C extensions don't have to
+know this is happening, so although it required a lot of changes to
+our C code to wrap and unwrap values that is as far as the changes go.
+</p>
+</div>
+</div>
+<div id="outline-container-org084a9f6" class="outline-3">
+<h3 id="org084a9f6"><span class="section-number-3">3.2</span> Tidying up wrappers</h3>
+<div class="outline-text-3" id="text-3-2">
+<p>
+It was also important that these wrappers didn't cause the objects
+they wrapped to live longer than expected. This was a real problem
+with the handle conversion we used to do, and we didn't want to make
+it worse. Wrappers obviously need to keep a strong reference to the
+object they wrap, and objects should also keep a strong reference to
+their wrapper, but converting an object to a native pointer should not
+stop it from getting garbage collected at some point, but equally it
+mustn't be collected too soon.
+</p>
+</div>
+</div>
+<div id="outline-container-orgcab440d" class="outline-3">
+<h3 id="orgcab440d"><span class="section-number-3">3.3</span> Keeping objects alive in MRI</h3>
+<div class="outline-text-3" id="text-3-3">
+<p>
+MRI keeps objects alive in two ways when they are being used in a C
+extension.Any object still on the stack will be seen by the GC and
+kept alive, but that isn't enough to preserve values which may have
+been assigned to to a field in a structure. MRI allows these to be
+kept alive by associating the structure with a Ruby object, and
+allowing that object to mark other it has references to. So, when the
+garbage collector traverses all the objects in your Ruby heap it calls
+these custom mark functions and the objects will be marked as live as
+long as the owners are. There's just one problem, we don't have a GC
+which can call custom mark functions, we have to work with any GC on
+the JVM. We also can't change the GC to look for native poitners on
+the stack which should also keep their respective objects alive.
+</p>
+</div>
+</div>
+<div id="outline-container-orgde65e21" class="outline-3">
+<h3 id="orgde65e21"><span class="section-number-3">3.4</span> Periodic marking</h3>
+<div class="outline-text-3" id="text-3-4">
+<p>
+We can solve this by keeping two lists of objects that need to be kept
+alive. Then each time we convert a wrapper to a native pointer we will
+add the wrapper to the lists, and it will in turn keep its object
+alive. One list is for those objects with pointers on the stack. We
+can create this list whenever we enter a C extension, and destroy it
+again when we finish the call. The other list is a fixed size buffer
+of every wrapper converted to a pointer. Whenever this list becomes
+full we'll run any marking functions associated with live objects and
+attach a lists of marked objects to their owners.
+</p>
+</div>
+</div>
+</div>
+<div id="outline-container-orgc92a09b" class="outline-2">
+<h2 id="orgc92a09b"><span class="section-number-2">4</span> Improved compatibility and remaining differences</h2>
+<div class="outline-text-2" id="text-4">
+<p>
+Applying these changes has allowed us to remove almost all our patches
+for C extensions, even for complex ones such as zlib, OpenSSl, or pg,
+but that doesn't mean we're completely finished. Translating between
+Ruby objects and native pointers requires updating a global hash
+table, which is relatively expensive. We can reduce that by tagging
+the pointers for common types, so true, false, nil, and so forth
+always convert to the same native value and never need to touch the
+hash table. Likewise fixnums can be tagged to cover most of their
+range, and we can probably use a similar technique for doubles or
+interned symbols.
+</p>
+
+<p>
+There are however still some fundamental differences between us and
+MRI, but they are much smaller than they were. One is that our <code>VALUE</code>
+type is a <code>void *</code> in C. This means we can't do a switch on a
+<code>VALUE</code>. We will experiment with using <code>long</code> for <code>VALUE</code>, but this
+may equire some changes to Sulong for support.
+</p>
+
+<p>
+We also can't yet translate a pointer to a Ruby array's contents to
+native. This requires storing the contents in native memory so that
+they can be read and altered from C, but ensuring that the view of the
+array from Ruby remains consistent with these changes. It's
+technically perfectly possible but will require some work on our array
+code to support it.
+</p>
+
+<p>
+There are also some small differences imposed by our use of Sulong to
+interpret C extensions. One is function declarations may need to be
+changed. For example a function declared as taking two arguments must
+be passed two arguments, even if the second one is never used, and
+<code>int</code> and pointer types may not be as interchangeable as they can be
+in native C. We also have trouble with varargs functions in managed
+code being called from native libraries, but none of these differences
+causes widespread problems and most can be patched without change the
+behaviour of any C extensions.
+</p>
+</div>
+</div>
+
+    </div>
+</section>
+
+
+<footer class="footer">
+    <p>Generated by <a href="http://www.gnu.org/software/emacs/">Emacs</a> 26.x (<a href="http://orgmode.org">Org mode</a> 9.x)</p>
+    <p>
+        Copyright &copy; 2012 - <span id="footerYear"></span> <a href="mailto:duncan &lt;at&gt; duncan-linux"></a>
+        &nbsp;&nbsp;-&nbsp;&nbsp;
+        Powered by <a href="https://github.com/kelvinh/org-page" target="_blank">org-page</a>
+        <script type="text/javascript">document.getElementById("footerYear").innerHTML = (new Date()).getFullYear();</script>
+    </p>
+</footer>
+
+  </body>
+</html>

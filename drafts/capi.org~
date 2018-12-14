@@ -1,0 +1,37 @@
+#+TITLE: Better support for C extensions in TruffleRuby.
+#+DATE: 2018-12-31 Mon
+We've been able to support C extensions in TruffleRuby for a long time
+now, but we've always had to patch them while building the C for them
+to work. We've just added much better support wihch almost completely
+removes the need to patch extensions. In this article I'll explain how
+Truffle based languages can support polyglot calls, how C extensiosn
+used to work in TruffleRuby, how they now work, and what the remaining
+differences are with MRI.
+* Itneractions between Truffle languages
+All Truffle languages can provide support for other languages to
+access data and make calls by defining how foreign access is
+resolved. This covers things like asking if an object is executable,
+or has a size, reading and writing public accessible fields, and so
+forth. So Javascript can easily call methods on a Ruby object, or
+access members of a Ruby array as long we we provide foreign access
+for Ruby objects.
+
+There is also support for lower level concepts in the foreign access
+APIs.  You can convert an object to a native representation, as well
+as checking whether that object can behave like a pointer.
+
+These facilities don't cover everything though, so Sulong provides a
+set of functions for converting almsot any object into a native handle
+and back again. I say almost any object because boxed primitives such
+as ~java.lang.Integer~ are not supported, but you can always arrange
+to wrap these to avoid the problem.
+* C extensions the old way
+We used Truffle's polyglot features to call C functions from Ruby, and
+Ruby methods from C, without touching the arguments at all. This
+allowed Ruby objects to pass easily through C code that is interpreted
+by Sulong, but fails if those objects have to be passed to a native
+shared library or stored on the native heap.
+** Managed memory
+** Handles everywhere
+* C extensions the new way
+* Remaining differences

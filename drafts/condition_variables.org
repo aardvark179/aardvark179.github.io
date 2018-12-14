@@ -1,0 +1,157 @@
+void request_uri(puma_parser* hp, const char *at, size_t length)
+I've been looking at the performance of the [[https://github.com/puma/puma][Puma]] websever recently,
+and it's clear we need to fix a few things.
+* Thread pools and work queues
+** The Puma thread pool design
+** Testing with a minimal task
+What's the smallest task you could submit to a thread pool? One that
+does nothing! Doing this we should be able to see how much time it
+takes the pool to process the tasks. To test this I wrote a benchmark
+that submitted 100000 tasks to the thread pool and timed how long that
+took. It's slightly more complex than that as I have to wait for the
+pool to not be full before submitting more tasks, but it's still very
+simple code.
+
+#+BEGIN_SRC ruby
+class TestTask
+  def run
+  end
+end
+
+MAX_THREADS = (ENV['MAX_THREADS'] || '8').to_i
+
+THREAD_POOL = Puma::ThreadPool.new(0, MAX_THREADS, Object) do | task, thing |
+  task.run
+end
+
+def test
+  100_000.times {
+    THREAD_POOL << TestTask.new
+    THREAD_POOL.wait_until_not_full
+  }
+end
+#+END_SRC
+The test is run twenty times for warmup, and another twenty for taking
+the actual measurements. I also ran the benchmark different numbers of
+max threads in the thread pool from 1 to 16. The results for MRI and
+TruffleRuby were as follows:
+
+#+NAME: MRI
+| Engine | Max threads |  Time |     sd. |
+|--------+-------------+-------+---------|
+| MRI    |           1 |  1.25 |  0.0273 |
+| MRI    |           2 | 0.925 |  0.0366 |
+| MRI    |           3 | 0.717 |  0.0137 |
+| MRI    |           4 | 0.548 |  0.0169 |
+| MRI    |           5 | 0.457 | 0.00931 |
+| MRI    |           6 | 0.396 |  0.0127 |
+| MRI    |           7 | 0.337 | 0.00809 |
+| MRI    |           8 | 0.315 | 0.00773 |
+| MRI    |           9 | 0.287 |  0.0176 |
+| MRI    |          10 | 0.275 | 0.00909 |
+| MRI    |          11 | 0.251 | 0.00884 |
+| MRI    |          12 | 0.249 |  0.0125 |
+| MRI    |          13 | 0.236 |  0.0234 |
+| MRI    |          14 |  0.23 | 0.00838 |
+| MRI    |          15 | 0.223 |   0.017 |
+| MRI    |          16 | 0.223 |  0.0141 |
+
+#+NAME: TruffleRuby
+| Engine      | Max threads | Time |    sd. |
+|-------------+-------------+------+--------|
+| TruffleRuby |           1 | 5.91 | 0.0548 |
+| TruffleRuby |           2 | 3.78 |  0.445 |
+| TruffleRuby |           3 | 2.64 |  0.271 |
+| TruffleRuby |           4 | 1.77 | 0.0498 |
+| TruffleRuby |           5 | 1.63 |  0.167 |
+| TruffleRuby |           6 | 1.45 |  0.219 |
+| TruffleRuby |           7 | 1.43 |  0.290 |
+| TruffleRuby |           8 | 1.29 |  0.231 |
+| TruffleRuby |           9 | 1.23 |  0.204 |
+| TruffleRuby |          10 | 1.24 |  0.211 |
+| TruffleRuby |          11 | 1.17 |  0.168 |
+| TruffleRuby |          12 | 1.18 |  0.162 |
+| TruffleRuby |          13 | 1.24 |  0.346 |
+| TruffleRuby |          14 | 1.18 |  0.175 |
+| TruffleRuby |          15 | 1.18 |  0.168 |
+| TruffleRuby |          16 | 1.20 |  0.171 |
+
+#+PLOT: title:"Thread pool performance" ind:1 deps:(2 4) type:2d
+#+PLOT: set:"key outside"
+#+PLOT: set:"yrange [0:]"
+| Max. Threads | MRI Time | MRI sd. | TruffleRuby Time | TruffleRuby sd. |
+|--------------+----------+---------+------------------+-----------------|
+|            1 |     1.25 |  0.0273 |             5.91 |          0.0548 |
+|            2 |    0.925 |  0.0366 |             3.78 |           0.445 |
+|            3 |    0.717 |  0.0137 |             2.64 |           0.271 |
+|            4 |    0.548 |  0.0169 |             1.77 |          0.0498 |
+|            5 |    0.457 | 0.00931 |             1.63 |           0.167 |
+|            6 |    0.396 |  0.0127 |             1.45 |           0.219 |
+|            7 |    0.337 | 0.00809 |             1.43 |           0.290 |
+|            8 |    0.315 | 0.00773 |             1.29 |           0.231 |
+|            9 |    0.287 |  0.0176 |             1.23 |           0.204 |
+|           10 |    0.275 | 0.00909 |             1.24 |           0.211 |
+|           11 |    0.251 | 0.00884 |             1.17 |           0.168 |
+|           12 |    0.249 |  0.0125 |             1.18 |           0.162 |
+|           13 |    0.236 |  0.0234 |             1.24 |           0.346 |
+|           14 |     0.23 | 0.00838 |             1.18 |           0.175 |
+|           15 |    0.223 |   0.017 |             1.18 |           0.168 |
+|           16 |    0.223 |  0.0141 |             1.20 |           0.171 |
+#+TBLFM: $1='(identity remote(MRI, @@#$2))
+#+TBLFM: $2='(identity remote(MRI, @@#$3))
+#+TBLFM: $3='(identity remote(MRI, @@#$4))
+#+TBLFM: $4='(identity remote(TruffleRuby, @@#$3))
+#+TBLFM: $5='(identity remote(TruffleRuby, @@#$4))
+
+That doesn't look so great. Let's have a look at what might be causing those problem.
+** Constant variable implementation
+Implementing condition variables in TruffleRuby is tricky as we have
+several constraints we need to keep in mind.
+
+** Reevaluating performance
+#+NAME: TruffleRuby2
+| Engine      | Max threads |  Time |    sd. |
+|-------------+-------------+-------+--------|
+| TruffleRuby |           1 |  1.16 | 0.0565 |
+| TruffleRuby |           2 | 0.790 | 0.0515 |
+| TruffleRuby |           3 | 0.574 | 0.0530 |
+| TruffleRuby |           4 | 0.443 | 0.0496 |
+| TruffleRuby |           5 | 0.448 | 0.0597 |
+| TruffleRuby |           6 | 0.420 | 0.0561 |
+| TruffleRuby |           7 | 0.420 | 0.0334 |
+| TruffleRuby |           8 | 0.467 |  0.119 |
+| TruffleRuby |           9 | 0.471 |  0.119 |
+| TruffleRuby |          10 | 0.460 | 0.0861 |
+| TruffleRuby |          11 | 0.430 |  0.119 |
+| TruffleRuby |          12 | 0.435 |  0.107 |
+| TruffleRuby |          13 | 0.496 |  0.134 |
+| TruffleRuby |          14 | 0.480 |  0.112 |
+| TruffleRuby |          15 | 0.523 |  0.145 |
+| TruffleRuby |          16 | 0.488 |  0.138 |
+
+#+PLOT: title:"Thread pool performance" ind:1 deps:(2 4) type:2d
+#+PLOT: set:"key inside"
+#+PLOT: set:"yrange [0:]"
+| Max. Threads | MRI Time | MRI sd. | TruffleRuby Time | TruffleRuby sd. |
+|--------------+----------+---------+------------------+-----------------|
+|            1 |     1.25 |  0.0273 |             1.16 |          0.0565 |
+|            2 |    0.925 |  0.0366 |            0.790 |          0.0515 |
+|            3 |    0.717 |  0.0137 |            0.574 |          0.0530 |
+|            4 |    0.548 |  0.0169 |            0.443 |          0.0496 |
+|            5 |    0.457 | 0.00931 |            0.448 |          0.0597 |
+|            6 |    0.396 |  0.0127 |            0.420 |          0.0561 |
+|            7 |    0.337 | 0.00809 |            0.420 |          0.0334 |
+|            8 |    0.315 | 0.00773 |            0.467 |           0.119 |
+|            9 |    0.287 |  0.0176 |            0.471 |           0.119 |
+|           10 |    0.275 | 0.00909 |            0.460 |          0.0861 |
+|           11 |    0.251 | 0.00884 |            0.430 |           0.119 |
+|           12 |    0.249 |  0.0125 |            0.435 |           0.107 |
+|           13 |    0.236 |  0.0234 |            0.496 |           0.134 |
+|           14 |     0.23 | 0.00838 |            0.480 |           0.112 |
+|           15 |    0.223 |   0.017 |            0.523 |           0.145 |
+|           16 |    0.223 |  0.0141 |            0.488 |           0.138 |
+#+TBLFM: $1='(identity remote(MRI, @@#$2))
+#+TBLFM: $2='(identity remote(MRI, @@#$3))
+#+TBLFM: $3='(identity remote(MRI, @@#$4))
+#+TBLFM: $4='(identity remote(TruffleRuby2, @@#$3))
+#+TBLFM: $5='(identity remote(TruffleRuby2, @@#$4))

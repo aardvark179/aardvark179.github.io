@@ -1,0 +1,422 @@
+<!DOCTYPE html>
+<html lang="en-us">
+<head>
+  <title>Improving PUma performance on TruffleRuby - aardvark179.github.io</title>
+  <meta charset="utf-8" />
+  <meta name="author" content="" />
+
+  <link rel="alternate" title="RSS Feed" href="/rss.xml" type="application/rss+xml">
+  <link rel="stylesheet" href="/media/css/main.css" type="text/css">
+  <link rel="stylesheet" href="/media/css/posts.css" type="text/css">
+
+  <script src="https://ajax.googleapis.com/ajax/libs/jquery/1.11.0/jquery.min.js"></script>
+  <script src="http://netdna.bootstrapcdn.com/bootstrap/3.1.1/js/bootstrap.min.js"></script>
+</head>
+
+  <body class="container">
+<header id="header">
+    <body>
+        <nav class="navbar navbar-default navbar-fixed-top" style="opacity: .9" role="navigation">
+            <div class="container-fluid">
+                <div class="navbar-header">
+                    <button type="button" class="navbar-toggle" data-toggle="collapse" data-target="#bs-example-navbar-collapse-1">
+                        <span class="sr-only">Toggle navigation</span>
+                        <span class="icon-bar"></span>
+                        <span class="icon-bar"></span>
+                        <span class="icon-bar"></span>
+                    </button>
+                    <a class="navbar-brand" href="/">aardvark179.github.io</a>
+                </div>
+                <div class="collapse navbar-collapse" id="bs-example-navbar-collapse-1">
+                    <ul class="nav navbar-nav navbar-right">
+                            <li class="active"><a href="/blog/">Blog</a></li>
+                        <li><a href="/tags/">Tags</a></li>
+                        <li><a href="/about/">About</a></li>
+                        <li><a href="https://github.com/aardvark179">GitHub</a></li>
+                        <li><a href="/rss.xml">RSS</a></li>
+                    </ul>
+                </div>
+            </div>
+        </nav>
+    </body>
+</header>
+
+<section id="content" role="main">
+    <div id="outline-container-sec-" class="row" style="padding-top: 70px">
+        <div class="col-md-2"></div>
+            <h1>Improving PUma performance on TruffleRuby</h1>
+            <div id="table-of-contents">
+<h2>Table of Contents</h2>
+<div id="text-table-of-contents">
+<ul>
+<li><a href="#orga579431">1. testing all the parts</a></li>
+<li><a href="#org7ffec4b">2. Work queues and thread pools</a>
+<ul>
+<li><a href="#org6d812e1">2.1. Condition variables in MRI and TruffleRuby</a></li>
+<li><a href="#orgad8588e">2.2. Checking the performance</a></li>
+<li><a href="#orgf34f1c2">2.3. Reimplementing condition variables</a>
+<ul>
+<li><a href="#org96b7575">2.3.1. Interrupts, safepoints, and locks</a></li>
+<li><a href="#org5ec1362">2.3.2. Unpicking the problem</a></li>
+<li><a href="#orgcd02056">2.3.3. Racing condition variables</a></li>
+<li><a href="#orga12a7db">2.3.4. Coordination ni a safepoint</a></li>
+</ul>
+</li>
+<li><a href="#org0b1dfc3">2.4. Revised performance results</a></li>
+</ul>
+</li>
+<li><a href="#orgc169674">3. The request parser</a>
+<ul>
+<li><a href="#org7806395">3.1. the C extension mutex</a></li>
+<li><a href="#org57e37ce">3.2. Native versus managed structs</a></li>
+<li><a href="#org86a24a4">3.3. Optimised code can be hard to optimise</a></li>
+</ul>
+</li>
+<li><a href="#org7307429">4. Revised performance results.</a></li>
+</ul>
+</div>
+</div>
+<p>
+<a href="https://github.com/puma/puma">Puma</a> is a Ruby web server commonly used with frameworks such as Rails or Rack, and it's often pretty quick. We got a bug report recently however which said it wasn't nearly as fast on TruffleRuby. Time to dig in and understand why.
+</p>
+<div id="outline-container-orga579431" class="outline-2">
+<h2 id="orga579431"><span class="section-number-2">1</span> testing all the parts</h2>
+<div class="outline-text-2" id="text-1">
+<p>
+I ran a simple test of serving "Hello world" and used Apache Bench to test this, both with one request at a time and with multiple requests concurrently. The results were not encouraging, we were much slower than MRI in both cases, and it was hard to tell where real performance gains needed to be made since the profiles were dominated by mutex operations. Why mutex operations? Well&#x2026;
+</p>
+</div>
+</div>
+<div id="outline-container-org7ffec4b" class="outline-2">
+<h2 id="org7ffec4b"><span class="section-number-2">2</span> Work queues and thread pools</h2>
+<div class="outline-text-2" id="text-2">
+<p>
+Puma uses a thread pool to process its requests, and a work queue to feed tasks to it. This isn't done using a simple <code>SizedQueue</code> but instead uses an array, a mutex and a few condition variables to coordinate the actions of the various threads. So, the throughput of the server is going to partially depend on how well this works.
+</p>
+</div>
+<div id="outline-container-org6d812e1" class="outline-3">
+<h3 id="org6d812e1"><span class="section-number-3">2.1</span> Condition variables in MRI and TruffleRuby</h3>
+<div class="outline-text-3" id="text-2-1">
+<p>
+Condition variables are something a lot of Java programmers will have used without even realising it. In Java you can do
+</p>
+<div class="org-src-container">
+<pre class="src src-java">synchronized(o) {
+o.wait();
+}
+</pre>
+</div>
+<p>
+To get a lock on the object <code>o</code>, wait for another thread to call notify on that object, and then continue execution. In the thread that's going to do the notification you do
+</p>
+<div class="org-src-container">
+<pre class="src src-java">synchronized(o) {
+o.notify();
+}
+</pre>
+</div>
+<p>
+Now, the sharp eyed among you will have noticed that both threads said they were synchronised on <code>o</code>, and may wonder how that can work. Well calling wait releases the lock, and reclaims it before execution can continue. This locking requirement really helps eliminate some race conditions that would otherwise easily occur and could result in the loss of notifications. You can also ask locks in the <code>java.util.concurrent</code> package for condition variables which provide similar functionality with added options around fairness.
+</p>
+
+<p>
+Ruby does things a little differently. Condition variables are separated from locks or mutexes, and instead take a mutex as one of the arguments when waiting, so in Ruby the code above would look more like
+</p>
+<div class="org-src-container">
+<pre class="src src-ruby">my_mutex = Mutex.new
+cond_var = ConditionVariable.new
+my_Mutex.synchronize do
+  cond_var.wait(my_mutex)
+end
+</pre>
+</div>
+<p>
+and
+</p>
+<div class="org-src-container">
+<pre class="src src-ruby">my_Mutex.synchronize do
+  cond_var.signal
+end
+</pre>
+</div>
+<p>
+Technically you don't even need the signalling thread to synchronise on the mutex, and different threads could be waiting on the same condition variable but with different mutexes. In TruffleRuby this was implemented in Ruby itself
+</p>
+<div class="org-src-container">
+<pre class="src src-ruby">def wait(mutex, timeout=nil)
+  Thread.handle_interrupt(StandardError =&gt; :never) do
+    begin
+      Thread.handle_interrupt(StandardError =&gt; :on_blocking) do
+        @waiters_mutex.synchronize do
+          @waiters[Thread.current] = true
+        end
+        mutex.sleep timeout
+      end
+    ensure
+      @waiters_mutex.synchronize do
+        @waiters.delete(Thread.current)
+      end
+    end
+  end
+  self
+end
+
+def signal
+  Thread.handle_interrupt(StandardError =&gt; :on_blocking) do
+    begin
+      t, _ = @waiters_mutex.synchronize { @waiters.shift }
+      t.run if t
+    rescue ThreadError
+      retry # t was already dead?
+    end
+  end
+  self
+end
+</pre>
+</div>
+<p>
+This works, apart from some subtle edge cases we'll talk about later, but it does involve quite a bit of work for every wait and signal, but the real question is how it performs.
+</p>
+</div>
+</div>
+<div id="outline-container-orgad8588e" class="outline-3">
+<h3 id="orgad8588e"><span class="section-number-3">2.2</span> Checking the performance</h3>
+<div class="outline-text-3" id="text-2-2">
+<p>
+I wrote a little bench mark that used Puma's thread pool to process a million trivial jobs (and I really do mean trivial, they did no work at all and simply returned nil). I ran this twenty times to ensure all JIT compilation had been done, and another twenty to for the results, and did this for thread pools of 1 to 16 threads. You can see the results below. We're a lot slower than MRI, what can we do to fix that? Well, we might note that each wait operation involves six mutex operations and that reducing this might help. We're also adding and deleting a lot of elements from the hash table of waiters.
+</p>
+</div>
+</div>
+<div id="outline-container-orgf34f1c2" class="outline-3">
+<h3 id="orgf34f1c2"><span class="section-number-3">2.3</span> Reimplementing condition variables</h3>
+<div class="outline-text-3" id="text-2-3">
+<p>
+So what's the best we could do? Well we might note that condition variables in Ruby are flexible, but that flexibility is rarely exploited, so we could probably just use a Java condition variable derived from the <code>java.util.concurrent.ReentrantLock</code> associated  with the mutex. That would greatly reduce our locking/unlocking operations. Could that work?
+</p>
+
+<p>
+Well a quick prototype showed it was much faster, but it was often impossible to terminate a running session cleanly. What was going wrong?
+</p>
+</div>
+<div id="outline-container-org96b7575" class="outline-4">
+<h4 id="org96b7575"><span class="section-number-4">2.3.1</span> Interrupts, safepoints, and locks</h4>
+<div class="outline-text-4" id="text-2-3-1">
+<p>
+It's quite common in language implementations, or in VMs, to have an idea of safe points. Moments where all threads are asked to pause their execution so that some coordinated task can be performed. Sometimes this only requires that each thread stop individually, but it may require that every thread stops at the same time, and waits until every thread has performed the requested action before continuing.
+</p>
+
+<p>
+Internally the JVM implements safepoints to allow the garbage collector to examine the threads' stacks, and for some tooling hooks to be run. In TruffleRuby we implement a safepoint mechanism for our threads in Java, and we do require that they all reach the safepoint before we can continue. 
+</p>
+
+<p>
+This is done in a couple of ways depending on what the threads are doing. If they are running normal ruby code then an <code>Assumption</code> is used. This is a very quick check that is pretty much optimised away until it is invalidated. That invalidation will cause any thread depending on the assumption to de-optimise, at which point it will check whether it needs to enter a safepoint.
+</p>
+
+<p>
+If the thread is in some sort of system call then it will be interrupted, and we'll check whether a safepoint has to be entered, and this is where the problem lies. For a thread waiting on a condition variable to be interrupted and continue execution of the safepoint it needs to reclaim the lock, but only one thread can hold the lock at any one time, so if two threads are both waiting on the same condition variable using the same mutex, or if another thread is holding that mutex for other reasons, then we aren't going to reach the safepoint.
+</p>
+</div>
+</div>
+<div id="outline-container-org5ec1362" class="outline-4">
+<h4 id="org5ec1362"><span class="section-number-4">2.3.2</span> Unpicking the problem</h4>
+<div class="outline-text-4" id="text-2-3-2">
+<p>
+So could we allow threads to be interrupted during a wait operation and not reclaim the lock? Sure we could, but it would require us to implement our own locks from the ground up, with some rather tricky semantics. It's doable, but I'd really rather not.
+</p>
+
+<p>
+Given that what could we do to allow threads to reach a safepoint without holding a the loc of the condition variable? Well we'll need that lock to be separate from the mutex passed to the wait method. So internally our Ruby condition variable will need to hold a Java lock, and a java condition variable associated with that lock. Since the only use of the lock will be for wait and signal calls we've made the problem a little more tractable. Now our wait operation in Java will look something like this
+</p>
+<div class="org-src-container">
+<pre class="src src-java">public DynamicObject rubyWait(DynamicObject var, DynamicObject mutex) {
+  Lock mutexLock = getLock(mutex);
+  Lock condLock = getLock(var);
+  Condition condVar = getCondVar(var);
+  mutexLock.unlock();
+  try {
+    condLock.lock();
+    condVar.await();
+  } finally {
+    condLock.unlock();
+    mutexLock.lock();
+  }
+}
+</pre>
+</div>
+<p>
+Well&#x2026; actually we need to handle safepoints so we'll have to change that centre bit to be
+</p>
+<div class="org-src-container">
+<pre class="src src-java">try {
+  context.getThreadManager().runUntilResult(currentNode, () -&gt; {
+    condLock.lock(); 
+    try {
+      condVar.await(); 
+    } finally {
+      condLock.unlock();
+    }
+  });
+} finally {
+  mutexLock.lock();
+}
+</pre>
+</div>
+<p>
+<code>runUntilResult</code> will run the lambda, check for a safepoint if it was interrupted, and run it again if needed. Now all our threads should be able to reach a safepoint in a nice way right? Well&#x2026;
+</p>
+</div>
+</div>
+<div id="outline-container-orgcd02056" class="outline-4">
+<h4 id="orgcd02056"><span class="section-number-4">2.3.3</span> Racing condition variables</h4>
+<div class="outline-text-4" id="text-2-3-3">
+<p>
+When a safepoint has been executed then all the threads can continue execution, so everything that was waiting for a condition variable will reclaim the lock as fast as possible, and start waiting which will release the lock and allow one of the other threads to do the same thing. But there might be a thread which is going to signal the others, and maybe it restarts its execution and calls signal before any of the waiters has managed to resume. Now we've lost a signal, and our work queue may be stuck forever.
+</p>
+
+<p>
+Actually there's another similar race condition hidden in the order of releasing the mutex lock and claiming the lock associated with the condition variable. So, to close loop holes we need to make a couple of changes. Our normal order of lock operations for a wait has to be
+</p>
+<ol class="org-ol">
+<li>Claim the condition lock</li>
+<li>Release the mutex lock</li>
+<li>Wait</li>
+<li>Release the condition lock</li>
+<li>Claim the mutex lock</li>
+</ol>
+<p>
+This breaks the common intuition we have that locks should always be released in the opposite order to which they were claimed, but does close our loop hole and won't dead lock. It does make our safepoint case even harder though, so let's look at what we need to happen for everything to resume after a safepoint.
+</p>
+</div>
+</div>
+<div id="outline-container-orga12a7db" class="outline-4">
+<h4 id="orga12a7db"><span class="section-number-4">2.3.4</span> Coordination ni a safepoint</h4>
+<div class="outline-text-4" id="text-2-3-4">
+<p>
+Safepoints internally use a phaser to synchronise the steps. A phaser allows a number of threads to coordinate their actions by advancing to the next step and optionally waiting for all the other threads to have done the same.
+</p>
+
+<p>
+Every Ruby thread registers with the safepoint phaser when it starts, and when a safepoint occurs each thread advances the phaser and waits for the others to have done so. They then all execute the action if needed and advance and wiat for the phaser again before resuming execution. The timeline looks something like
+</p>
+
+<p>
+To unpick our locking problem we need to refine this model slightly. Threads will need to be able to execute an action before resuming, and if they have such an action should resume without waiting for other threads. Now the threads waiting on a condition variable can lock it again as their resume action, and then resume waiting (which will release the lock once more). So now our timeline should look more like
+</p>
+</div>
+</div>
+</div>
+<div id="outline-container-org0b1dfc3" class="outline-3">
+<h3 id="org0b1dfc3"><span class="section-number-3">2.4</span> Revised performance results</h3>
+<div class="outline-text-3" id="text-2-4">
+<p>
+So we didn't manage to simplify things quite as much as we wanted, and there's a few more minor complications I won't go into around interrupting threads while they try to reacquire the mutex lock, but are we looking better performance wise?
+</p>
+
+<p>
+Yes! We're now at pretty much the same performance on this work queue as MRI up to the number of physical cores. If we make the tasks do some actual work then you can see that TruffleRuby can actually execute those tasks in parallel while MRI is limited to a single thread of execution.
+</p>
+
+<p>
+Time to test the next part of the system and see how that compares.
+</p>
+</div>
+</div>
+</div>
+<div id="outline-container-orgc169674" class="outline-2">
+<h2 id="orgc169674"><span class="section-number-2">3</span> The request parser</h2>
+<div class="outline-text-2" id="text-3">
+<p>
+Puma uses a C extension to parse the incoming http request. We can run C extensions in TruffleRuby through Sulong (an LLVM bitcode interpreter written using the Truffle framework), and they go through the JIT in just the same way that Ruby code does. This can make them extremely fast, especially when they do relatively small tasks, but sometimes they need patching, or have interactions with native libraries that can cause a problem.  We've already got patches for Puma's extension because it stores a couple of Ruby objects in a structure allocated in native memory. Again, let's check the performance of this in isolation and see how we're doing.
+</p>
+
+<p>
+The test will parse ten thousand headers (actually the same header every time) into hash tables with the same initial entires as we'd see in the main test of Puma.
+</p>
+
+<p>
+That's not good, and it probably accounts for a lot of the reason we're slower, but there's a couple of things we cna do to try and speed this up.
+</p>
+</div>
+<div id="outline-container-org7806395" class="outline-3">
+<h3 id="org7806395"><span class="section-number-3">3.1</span> the C extension mutex</h3>
+<div class="outline-text-3" id="text-3-1">
+<p>
+We know that not all C extensions can support multiple concurrent threads, so we normally use a mutex to ensure only one can be run at a time. This can't be a ismple lock unlock operation though as mutexes in Ruby are not reentrant - so we need to check if we own it first. This only adds a little overhead but we can disable it with a command line option.
+</p>
+</div>
+</div>
+<div id="outline-container-org57e37ce" class="outline-3">
+<h3 id="org57e37ce"><span class="section-number-3">3.2</span> Native versus managed structs</h3>
+<div class="outline-text-3" id="text-3-2">
+<p>
+LEt's take a look at the struct being used to hold the parser state. It starts with a set of integers for various positions within the string being parsed, has two values representing the hash table for the request headers and the body (if any), and then has a whole set of call backs for populating the hash table with the results of parsing the data. Now, all those callbacks are interpreted code in Sulong, but they need to stored as function pointers in a native structure, so they will have to be turned into closures that can be called.
+</p>
+
+<p>
+So we're going to be seeing a lot of transitions from native to managed code, and between objects and handles.
+</p>
+
+<p>
+If we move the struct to be a managed object then we'll get rid of most of those transitions and hopefully make things a lot faster. Let's give it a go!
+</p>
+
+<p>
+Well, that's etter but we're still a long way off. Let's try stubbing out the Ruby parts entirely and see how we do with just the parser code.
+</p>
+</div>
+</div>
+<div id="outline-container-org86a24a4" class="outline-3">
+<h3 id="org86a24a4"><span class="section-number-3">3.3</span> Optimised code can be hard to optimise</h3>
+<div class="outline-text-3" id="text-3-3">
+<p>
+So what's going wrong here? Well the parser isn't hand written, it's a rather large method consisting of a complex set of switch statements and gotos generated by Ragel from a much higher level description of the parser. Parser generators are very useful bits programs, not least because they can often target multiple targets. Puma already targets C and JAva (for its JRuby extension).
+</p>
+
+<p>
+It would appear that Sulong doesn't work well with this code (the precise reasons are probably a whoel article of their own) so I decided to try something radical. How fast would the parser be if I generated it as pure Ruby?
+</p>
+
+<p>
+The core of the parser is in one Ragel file, with C and Java specifics in their own separate files, so all I needed to do was take one of those, transpose the logic to Ruby, and then invoke Ragel to generate a parser for me. A little debugging later and I had a working parser. Let's take it for a spin!
+</p>
+
+<p>
+Close, but not quite there yet. Luckily Ragel has a few options to help control its code generation, so I explored those a little and got found the fast table output to work best for us. In fact it's pretty much up there with the C version running natively!
+</p>
+
+<p>
+Okay, now let's go back to running the full  Puma tests and see where these changes have put us.
+</p>
+</div>
+</div>
+</div>
+<div id="outline-container-org7307429" class="outline-2">
+<h2 id="org7307429"><span class="section-number-2">4</span> Revised performance results.</h2>
+<div class="outline-text-2" id="text-4">
+<p>
+So, we're not quite as fast with a sinle concurrent request, but we're now better than MRI when running concurrent requests. I'll try to dig into that a little more on a larger multicore machine.
+</p>
+
+<p>
+It's probably also wroth experimenting with payloads that require different amounts of IO to the client, and from the server itself.
+</p>
+</div>
+</div>
+
+    </div>
+</section>
+
+
+<footer class="footer">
+    <p>Generated by <a href="http://www.gnu.org/software/emacs/">Emacs</a> 26.x (<a href="http://orgmode.org">Org mode</a> 9.x)</p>
+    <p>
+        Copyright &copy; 2012 - <span id="footerYear"></span> <a href="mailto:duncan &lt;at&gt; duncan-linux"></a>
+        &nbsp;&nbsp;-&nbsp;&nbsp;
+        Powered by <a href="https://github.com/kelvinh/org-page" target="_blank">org-page</a>
+        <script type="text/javascript">document.getElementById("footerYear").innerHTML = (new Date()).getFullYear();</script>
+    </p>
+</footer>
+
+  </body>
+</html>
