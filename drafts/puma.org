@@ -130,15 +130,7 @@ Safepoints internally use a phaser to synchronise the steps. A phaser allows a n
 
 Every Ruby thread registers with the safepoint phaser when it starts, and when a safepoint occurs each thread advances the phaser and waits for the others to have done so. They then all execute the action if needed and advance and wiat for the phaser again before resuming execution. The timeline looks something like
 
-#+BEGIN_SRC dot
-
-#+END_SRC
-
 To unpick our locking problem we need to refine this model slightly. Threads will need to be able to execute an action before resuming, and if they have such an action should resume without waiting for other threads. Now the threads waiting on a condition variable can lock it again as their resume action, and then resume waiting (which will release the lock once more). So now our timeline should look more like
-
-#+BEGIN_SRC dot
-
-#+END_SRC
 ** Revised performance results
 So we didn't manage to simplify things quite as much as we wanted, and there's a few more minor complications I won't go into around interrupting threads while they try to reacquire the mutex lock, but are we looking better performance wise?
 
