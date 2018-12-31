@@ -46,6 +46,161 @@ provided to convert between managed objects and native handles. These
 functions were hard to use without introducing memory leaks however,
 and did require that we patched every point at which a Ruby object
 needed to be converted to or from native memory.
+* Difficult issues with our old approach
+So, there are a couple of issues with the old approach and resource
+leaks. Let's take a look at the behaviour we would like, the problems
+we could see with the old approach, and how we what we could do to fix
+those. We'll start by considering a simple case of three objects A, B,
+and C. A will be a GC root (i.e. it's either some sort of global
+object or a variable which the garbage collector knows cannot be
+removed), and B and C are Ruby objects. A will have an instance
+variable of B, and B will have one of C. So A has a hard reference to
+B and B has a hard reference to C like this.
+#+BEGIN_SRC dot :file diagram.svg :exports results
+digraph D {
+
+ A [shape = box color = red]
+ B [shape = box]
+ C [shape = box]
+
+ A -> B [color=red]
+ B -> C [color=red]
+}
+#+END_SRC
+
+#+RESULTS:
+[[file:diagram.svg]]
+
+We'll use red arrows to indicate hard references from now on,m and red
+boxes to indicate GC roots. The good thing here is that if A stops
+being a root, or a hard reference is removed then some or all of the
+objects can be collected.
+
+Now, what happens when A, B, and C are C structs which have been
+wrapped in Ruby objects? Well, now our hard references are jst
+~VALUEs~ in the structs, and for the GC to know those are alive each
+object must mark those it has references to. We'll use purple to mark
+marked links.
+
+#+BEGIN_SRC dot :file diagram2.svg :exports results
+digraph D {
+
+ A [shape = box color = red]
+ B [shape = box]
+ C [shape = box]
+
+ A -> B [color=purple]
+ B -> C [color=purple]
+}
+#+END_SRC
+
+#+RESULTS:
+[[file:diagram2.svg]]
+
+So in this situation if A stops marking B, or B stops marking C then
+those objects can be collected.
+
+Now what happens in TruffleRuby when we use handles?
+
+#+BEGIN_SRC dot :file diagram3.svg :exports results
+digraph D {
+
+ X [label="Handle table" shape=box color = red]
+ A [shape = box color = red]
+ B [shape = box]
+ C [shape = box]
+
+ A -> B [color=blue]
+ B -> C [color=blue]
+
+ X -> B [color=red]
+ X -> C [color=red]
+}
+#+END_SRC
+
+#+RESULTS:
+[[file:diagram3.svg]]
+
+Now we have a problem. The references from A to B, and B to C are weak
+(they are simple handle numbers) so the handle table has to associate
+those with the objects they represent by keeping a strong
+reference. For C to be garbage collected we would need to remove the
+handle pointing to it. Easy right? Well, not always. Let us consider a
+tree like this
+
+#+BEGIN_SRC dot :file diagram4.svg :exports results
+digraph D {
+
+ Object [shape = box color = red]
+
+ Document [shape = box]
+ NodeA [shape = box]
+ NodeB [shape = box]
+ NodeC [shape = box]
+ NodeD [shape = box]
+
+ Object -> Document [color=red]
+ Document -> NodeA [color=red]
+ NodeA -> NodeB [color=red]
+ NodeA -> NodeC [color=red]
+ Document -> NodeD [color=red]
+
+ NodeA -> Document [color=red]
+ NodeB -> Document [color=red]
+ NodeC -> Document [color=red]
+ NodeD -> Document [color=red]
+}
+#+END_SRC
+
+#+RESULTS:
+[[file:diagram4.svg]]
+
+This is a common sort of structure to find in tools like XML
+processors. Each node has a reference to the parent document, and to
+its own children. If we break the hard reference from the GC root
+object to the document then it and all of its nodes can be
+collected. The same is true if the nodes hold ~VALUEs~ and mark them,
+but what happens if we use handles?
+
+#+BEGIN_SRC dot :file diagram5.svg :exports results
+digraph D {
+
+ Object [shape = box color = red]
+ X [label="Handle table" shape=box color = red]
+
+ Document [shape = box]
+ NodeA [shape = box]
+ NodeB [shape = box]
+ NodeC [shape = box]
+ NodeD [shape = box]
+
+ Object -> Document  [color=blue]
+ Document -> NodeA [color=blue]
+ NodeA -> NodeB [color=blue]
+ NodeA -> NodeC [color=blue]
+ Document -> NodeD [color=blue]
+
+ NodeA -> Document [color=blue]
+ NodeB -> Document [color=blue]
+ NodeC -> Document [color=blue]
+ NodeD -> Document [color=blue]
+
+ X -> Document [color=red]
+ X -> NodeA [color=red]
+ X -> NodeB [color=red]
+ X -> NodeC [color=red]
+ X -> NodeD [color=red]
+}
+#+END_SRC
+
+#+RESULTS:
+[[file:diagram5.svg]]
+
+Well, our diagram has certainly got messier! But it's also hard to
+know how we should free those handles nicely. There doesn't seem to be
+a nice obvious order in which we coiuld do it, and breaking the hard
+reference from Object to Document won't be enough to free the
+document. We could untangle this if some of those refrences were weak.
 * C extensions the new way
 Our previous approach was enough to get several key C extensions
 working, but sometimes they required large patches, and avoiding
