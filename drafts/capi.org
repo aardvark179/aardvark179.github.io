@@ -58,6 +58,7 @@ variable of B, and B will have one of C. So A has a hard reference to
 B and B has a hard reference to C like this.
 #+BEGIN_SRC dot :file diagram.svg :exports results
 digraph D {
+ rankdir="LR";
 
  A [shape = box color = red]
  B [shape = box]
@@ -69,7 +70,7 @@ digraph D {
 #+END_SRC
 
 #+RESULTS:
-[[file:diagram.svg]]
+[[diagram.svg]]
 
 We'll use red arrows to indicate hard references from now on,m and red
 boxes to indicate GC roots. The good thing here is that if A stops
@@ -84,6 +85,7 @@ marked links.
 
 #+BEGIN_SRC dot :file diagram2.svg :exports results
 digraph D {
+ rankdir="LR";
 
  A [shape = box color = red]
  B [shape = box]
@@ -95,15 +97,16 @@ digraph D {
 #+END_SRC
 
 #+RESULTS:
-[[file:diagram2.svg]]
+[[diagram2.svg]]
 
-So in this situation if A stops marking B, or B stops marking C then
-those objects can be collected.
+So in this situation if A stops marking B, or B stops marking C, or A
+ceases to be a GC root then those objects can be collected.
 
 Now what happens in TruffleRuby when we use handles?
 
 #+BEGIN_SRC dot :file diagram3.svg :exports results
 digraph D {
+ rankdir="LR";
 
  X [label="Handle table" shape=box color = red]
  A [shape = box color = red]
@@ -119,17 +122,23 @@ digraph D {
 #+END_SRC
 
 #+RESULTS:
-[[file:diagram3.svg]]
+[[diagram3.svg]]
 
 Now we have a problem. The references from A to B, and B to C are weak
 (they are simple handle numbers) so the handle table has to associate
 those with the objects they represent by keeping a strong
-reference. For C to be garbage collected we would need to remove the
-handle pointing to it. Easy right? Well, not always. Let us consider a
-tree like this
+reference. For B or C to be garbage collected we would need to remove
+the handle pointing to them. Likewise if A ceases to be a root
+something needs to happen for B and C to be collected.
+
+We might be able to do that with a finaliser for A which in turn
+releases the handle to B, whose finaliser can release the handle to C,
+but the situation may not always be so simple. Consider the following
+structure of objects.
 
 #+BEGIN_SRC dot :file diagram4.svg :exports results
 digraph D {
+ rankdir="LR";
 
  Object [shape = box color = red]
 
@@ -153,7 +162,7 @@ digraph D {
 #+END_SRC
 
 #+RESULTS:
-[[file:diagram4.svg]]
+[[diagram4.svg]]
 
 This is a common sort of structure to find in tools like XML
 processors. Each node has a reference to the parent document, and to
@@ -164,6 +173,7 @@ but what happens if we use handles?
 
 #+BEGIN_SRC dot :file diagram5.svg :exports results
 digraph D {
+ rankdir="LR";
 
  Object [shape = box color = red]
  X [label="Handle table" shape=box color = red]
@@ -194,13 +204,19 @@ digraph D {
 #+END_SRC
 
 #+RESULTS:
-[[file:diagram5.svg]]
+[[diagram5.svg]]
 
 Well, our diagram has certainly got messier! But it's also hard to
 know how we should free those handles nicely. There doesn't seem to be
-a nice obvious order in which we coiuld do it, and breaking the hard
-reference from Object to Document won't be enough to free the
-document. We could untangle this if some of those refrences were weak.
+a nice obvious order in which we coiuld do it, and Object ceasing to
+be a GC root won't be enough to free the structure even with
+finalisers because even when object release its handle on document
+there are still all the children holding handles for it, so the whole
+structure is still reachable from the handle table. We could solve
+almost any situation like this by introducing weak handles, but that
+requires patching each C extension, and carefully analysing how to
+break these cycles. To really be compatible we need a different
+approach.
 * C extensions the new way
 Our previous approach was enough to get several key C extensions
 working, but sometimes they required large patches, and avoiding
@@ -211,7 +227,7 @@ both these approaches had issues. So we tried a third approach,
 wrapping every Ruby object.
 ** Wrapping and unwrapping
 The idea is fairly simple. C extensions will never see raw Ruby
-object, they will only ever see wrappers that know how to convert
+objects, they will only ever see wrappers that know how to convert
 themselves to native pointers, and at every point where a Ruby object
 needs to be extracted from a wrapper we know there should only ever be
 a wrapper or a native pointer. This makes it easy to convert back from
