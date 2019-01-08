@@ -49,22 +49,23 @@
 <h2>Table of Contents</h2>
 <div id="text-table-of-contents">
 <ul>
-<li><a href="#orgc2c5638">1. Interactions between Truffle languages</a></li>
-<li><a href="#orgf5af4b9">2. C extensions the old way</a>
+<li><a href="#org71897b7">1. Interactions between Truffle languages</a></li>
+<li><a href="#orgcdc75a2">2. C extensions the old way</a>
 <ul>
-<li><a href="#org58d5c31">2.1. Managed memory</a></li>
-<li><a href="#org7651c06">2.2. Handles everywhere</a></li>
+<li><a href="#org734aeae">2.1. Managed memory</a></li>
+<li><a href="#org58ad385">2.2. Handles everywhere</a></li>
 </ul>
 </li>
-<li><a href="#orgcfa0dcd">3. C extensions the new way</a>
+<li><a href="#org07794fa">3. Difficult issues with our old approach</a></li>
+<li><a href="#org7cdfc91">4. C extensions the new way</a>
 <ul>
-<li><a href="#orgd6e870d">3.1. Wrapping and unwrapping</a></li>
-<li><a href="#org084a9f6">3.2. Tidying up wrappers</a></li>
-<li><a href="#orgcab440d">3.3. Keeping objects alive in MRI</a></li>
-<li><a href="#orgde65e21">3.4. Periodic marking</a></li>
+<li><a href="#orgf04c0bb">4.1. Wrapping and unwrapping</a></li>
+<li><a href="#org3c51ddd">4.2. Tidying up wrappers</a></li>
+<li><a href="#org6f8f32e">4.3. Keeping objects alive in MRI</a></li>
+<li><a href="#org54cb541">4.4. Periodic marking</a></li>
 </ul>
 </li>
-<li><a href="#orgc92a09b">4. Improved compatibility and remaining differences</a></li>
+<li><a href="#org8a57100">5. Improved compatibility and remaining differences</a></li>
 </ul>
 </div>
 </div>
@@ -77,8 +78,8 @@ Truffle based languages can support polyglot calls, how C extensions
 used to work in TruffleRuby, how they now work, and what the remaining
 differences are with MRI.
 </p>
-<div id="outline-container-orgc2c5638" class="outline-2">
-<h2 id="orgc2c5638"><span class="section-number-2">1</span> Interactions between Truffle languages</h2>
+<div id="outline-container-org71897b7" class="outline-2">
+<h2 id="org71897b7"><span class="section-number-2">1</span> Interactions between Truffle languages</h2>
 <div class="outline-text-2" id="text-1">
 <p>
 All Truffle languages can provide support for other languages to
@@ -105,8 +106,8 @@ to wrap these to avoid the problem.
 </p>
 </div>
 </div>
-<div id="outline-container-orgf5af4b9" class="outline-2">
-<h2 id="orgf5af4b9"><span class="section-number-2">2</span> C extensions the old way</h2>
+<div id="outline-container-orgcdc75a2" class="outline-2">
+<h2 id="orgcdc75a2"><span class="section-number-2">2</span> C extensions the old way</h2>
 <div class="outline-text-2" id="text-2">
 <p>
 We used Truffle's polyglot features to call C functions from Ruby, and
@@ -117,11 +118,11 @@ shared library or stored on the native heap. To solve that problem we
 would patch C extensions in too ways.
 </p>
 </div>
-<div id="outline-container-org58d5c31" class="outline-3">
-<h3 id="org58d5c31"><span class="section-number-3">2.1</span> Managed memory</h3>
+<div id="outline-container-org734aeae" class="outline-3">
+<h3 id="org734aeae"><span class="section-number-3">2.1</span> Managed memory</h3>
 <div class="outline-text-3" id="text-2-1">
 <p>
-The first way to avoid problems with thetranslation of Ruby objects to
+The first way to avoid problems with the translation of Ruby objects to
 native pointers is to avoid doing as much as possible. By default we'd
 replace every array of <code>VALUE</code> objects (which would be stored on the
 native heap) with a managed object that could store the object without
@@ -131,8 +132,8 @@ nested members of fused arrays.
 </p>
 </div>
 </div>
-<div id="outline-container-org7651c06" class="outline-3">
-<h3 id="org7651c06"><span class="section-number-3">2.2</span> Handles everywhere</h3>
+<div id="outline-container-org58ad385" class="outline-3">
+<h3 id="org58ad385"><span class="section-number-3">2.2</span> Handles everywhere</h3>
 <div class="outline-text-3" id="text-2-2">
 <p>
 The second way to solve these problems was to use the functions Sulong
@@ -144,9 +145,122 @@ needed to be converted to or from native memory.
 </div>
 </div>
 </div>
-<div id="outline-container-orgcfa0dcd" class="outline-2">
-<h2 id="orgcfa0dcd"><span class="section-number-2">3</span> C extensions the new way</h2>
+<div id="outline-container-org07794fa" class="outline-2">
+<h2 id="org07794fa"><span class="section-number-2">3</span> Difficult issues with our old approach</h2>
 <div class="outline-text-2" id="text-3">
+<p>
+So, there are a couple of issues with the old approach and resource
+leaks. Let's take a look at the behaviour we would like, the problems
+we could see with the old approach, and how we what we could do to fix
+those. We'll start by considering a simple case of three objects A, B,
+and C. A will be a GC root (i.e. it's either some sort of global
+object or a variable which the garbage collector knows cannot be
+removed), and B and C are Ruby objects. A will have an instance
+variable of B, and B will have one of C. So A has a hard reference to
+B and B has a hard reference to C like this.
+</p>
+
+<div class="figure">
+<p><object type="image/svg+xml" data="diagram.svg" class="org-svg">
+Sorry, your browser does not support SVG.</object>
+</p>
+</div>
+
+<p>
+We'll use red arrows to indicate hard references from now on,m and red
+boxes to indicate GC roots. The good thing here is that if A stops
+being a root, or a hard reference is removed then some or all of the
+objects can be collected.
+</p>
+
+<p>
+Now, what happens when A, B, and C are C structs which have been
+wrapped in Ruby objects? Well, now our hard references are jst
+<code>VALUEs</code> in the structs, and for the GC to know those are alive each
+object must mark those it has references to. We'll use purple to mark
+marked links.
+</p>
+
+
+<div class="figure">
+<p><object type="image/svg+xml" data="diagram2.svg" class="org-svg">
+Sorry, your browser does not support SVG.</object>
+</p>
+</div>
+
+<p>
+So in this situation if A stops marking B, or B stops marking C, or A
+ceases to be a GC root then those objects can be collected.
+</p>
+
+<p>
+Now what happens in TruffleRuby when we use handles?
+</p>
+
+
+<div class="figure">
+<p><object type="image/svg+xml" data="diagram3.svg" class="org-svg">
+Sorry, your browser does not support SVG.</object>
+</p>
+</div>
+
+<p>
+Now we have a problem. The references from A to B, and B to C are weak
+(they are simple handle numbers) so the handle table has to associate
+those with the objects they represent by keeping a strong
+reference. For B or C to be garbage collected we would need to remove
+the handle pointing to them. Likewise if A ceases to be a root
+something needs to happen for B and C to be collected.
+</p>
+
+<p>
+We might be able to do that with a finaliser for A which in turn
+releases the handle to B, whose finaliser can release the handle to C,
+but the situation may not always be so simple. Consider the following
+structure of objects.
+</p>
+
+
+<div class="figure">
+<p><object type="image/svg+xml" data="diagram4.svg" class="org-svg">
+Sorry, your browser does not support SVG.</object>
+</p>
+</div>
+
+<p>
+This is a common sort of structure to find in tools like XML
+processors. Each node has a reference to the parent document, and to
+its own children. If we break the hard reference from the GC root
+object to the document then it and all of its nodes can be
+collected. The same is true if the nodes hold <code>VALUEs</code> and mark them,
+but what happens if we use handles?
+</p>
+
+
+<div class="figure">
+<p><object type="image/svg+xml" data="diagram5.svg" class="org-svg">
+Sorry, your browser does not support SVG.</object>
+</p>
+</div>
+
+<p>
+Well, our diagram has certainly got messier! But it's also hard to
+know how we should free those handles nicely. There doesn't seem to be
+a nice obvious order in which we coiuld do it, and Object ceasing to
+be a GC root won't be enough to free the structure even with
+finalisers because even when object release its handle on document
+there are still all the children holding handles for it, so the whole
+structure is still reachable from the handle table. We could solve
+almost any situation like this by introducing weak handles, but that
+requires patching each C extension, and carefully analysing how to
+break these cycles. To really be compatible we need a different
+approach.
+</p>
+</div>
+</div>
+<div id="outline-container-org7cdfc91" class="outline-2">
+<h2 id="org7cdfc91"><span class="section-number-2">4</span> C extensions the new way</h2>
+<div class="outline-text-2" id="text-4">
 <p>
 Our previous approach was enough to get several key C extensions
 working, but sometimes they required large patches, and avoiding
@@ -157,12 +271,12 @@ both these approaches had issues. So we tried a third approach,
 wrapping every Ruby object.
 </p>
 </div>
-<div id="outline-container-orgd6e870d" class="outline-3">
-<h3 id="orgd6e870d"><span class="section-number-3">3.1</span> Wrapping and unwrapping</h3>
-<div class="outline-text-3" id="text-3-1">
+<div id="outline-container-orgf04c0bb" class="outline-3">
+<h3 id="orgf04c0bb"><span class="section-number-3">4.1</span> Wrapping and unwrapping</h3>
+<div class="outline-text-3" id="text-4-1">
 <p>
 The idea is fairly simple. C extensions will never see raw Ruby
-object, they will only ever see wrappers that know how to convert
+objects, they will only ever see wrappers that know how to convert
 themselves to native pointers, and at every point where a Ruby object
 needs to be extracted from a wrapper we know there should only ever be
 a wrapper or a native pointer. This makes it easy to convert back from
@@ -172,9 +286,9 @@ our C code to wrap and unwrap values that is as far as the changes go.
 </p>
 </div>
 </div>
-<div id="outline-container-org084a9f6" class="outline-3">
-<h3 id="org084a9f6"><span class="section-number-3">3.2</span> Tidying up wrappers</h3>
-<div class="outline-text-3" id="text-3-2">
+<div id="outline-container-org3c51ddd" class="outline-3">
+<h3 id="org3c51ddd"><span class="section-number-3">4.2</span> Tidying up wrappers</h3>
+<div class="outline-text-3" id="text-4-2">
 <p>
 It was also important that these wrappers didn't cause the objects
 they wrapped to live longer than expected. This was a real problem
@@ -187,9 +301,9 @@ mustn't be collected too soon.
 </p>
 </div>
 </div>
-<div id="outline-container-orgcab440d" class="outline-3">
-<h3 id="orgcab440d"><span class="section-number-3">3.3</span> Keeping objects alive in MRI</h3>
-<div class="outline-text-3" id="text-3-3">
+<div id="outline-container-org6f8f32e" class="outline-3">
+<h3 id="org6f8f32e"><span class="section-number-3">4.3</span> Keeping objects alive in MRI</h3>
+<div class="outline-text-3" id="text-4-3">
 <p>
 MRI keeps objects alive in two ways when they are being used in a C
 extension.Any object still on the stack will be seen by the GC and
@@ -201,14 +315,14 @@ garbage collector traverses all the objects in your Ruby heap it calls
 these custom mark functions and the objects will be marked as live as
 long as the owners are. There's just one problem, we don't have a GC
 which can call custom mark functions, we have to work with any GC on
-the JVM. We also can't change the GC to look for native poitners on
+the JVM. We also can't change the GC to look for native pointers on
 the stack which should also keep their respective objects alive.
 </p>
 </div>
 </div>
-<div id="outline-container-orgde65e21" class="outline-3">
-<h3 id="orgde65e21"><span class="section-number-3">3.4</span> Periodic marking</h3>
-<div class="outline-text-3" id="text-3-4">
+<div id="outline-container-org54cb541" class="outline-3">
+<h3 id="org54cb541"><span class="section-number-3">4.4</span> Periodic marking</h3>
+<div class="outline-text-3" id="text-4-4">
 <p>
 We can solve this by keeping two lists of objects that need to be kept
 alive. Then each time we convert a wrapper to a native pointer we will
@@ -223,9 +337,9 @@ attach a lists of marked objects to their owners.
 </div>
 </div>
 </div>
-<div id="outline-container-orgc92a09b" class="outline-2">
-<h2 id="orgc92a09b"><span class="section-number-2">4</span> Improved compatibility and remaining differences</h2>
-<div class="outline-text-2" id="text-4">
+<div id="outline-container-org8a57100" class="outline-2">
+<h2 id="org8a57100"><span class="section-number-2">5</span> Improved compatibility and remaining differences</h2>
+<div class="outline-text-2" id="text-5">
 <p>
 Applying these changes has allowed us to remove almost all our patches
 for C extensions, even for complex ones such as zlib, OpenSSl, or pg,
@@ -244,7 +358,7 @@ There are however still some fundamental differences between us and
 MRI, but they are much smaller than they were. One is that our <code>VALUE</code>
 type is a <code>void *</code> in C. This means we can't do a switch on a
 <code>VALUE</code>. We will experiment with using <code>long</code> for <code>VALUE</code>, but this
-may equire some changes to Sulong for support.
+may require some changes to Sulong for support.
 </p>
 
 <p>
