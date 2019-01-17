@@ -29,7 +29,7 @@ These facilities don't cover everything though, so Sulong provides a
 set of functions for converting almost any object into a native handle
 and back again. I say almost any object because boxed primitives such
 as ~java.lang.Integer~ are not supported, but you can always arrange
-to wrap these in in an object that is supported (and unwrap them again
+to wrap these in an object that is supported (and unwrap them again
 when converting back from handles) to avoid the problem.
 * C extensions the old way
 We used Truffle's polyglot features to call C functions from Ruby, and
@@ -55,7 +55,7 @@ needed to be converted to or from native memory.
 * Difficult issues with our old approach
 So, there are a couple of issues with the old approach and resource
 leaks. Let's take a look at the behaviour we would like, the problems
-we could see with the old approach, and how we what we could do to fix
+we could see with the old approach, and what we could do to fix
 those. We'll start by considering a simple case of three objects A, B,
 and C. A will be a GC root (i.e. it's either some sort of global
 object or a variable which the garbage collector knows cannot be
@@ -64,7 +64,6 @@ variable of B, and B will have one of C. So A has a hard reference to
 B and B has a hard reference to C like this.
 #+BEGIN_SRC dot :file diagram.svg :exports results
 digraph D {
- rankdir="LR";
 
  A [shape = box color = red]
  B [shape = box]
@@ -78,10 +77,54 @@ digraph D {
 #+RESULTS:
 [[diagram.svg]]
 
-We'll use red arrows to indicate hard references from now on,m and red
+We'll use red arrows to indicate hard references from now on, and red
 boxes to indicate GC roots. The good thing here is that if A stops
 being a root, or a hard reference is removed then some or all of the
 objects can be collected.
+
+#+BEGIN_SRC dot :file diagram_gc.svg :exports results
+digraph D {
+ subgraph cluster_before {
+  label = "Before GC";
+  A_1 [label="A" shape = box]
+  B_1 [label="B" shape = box]
+  C_1 [label="C" shape = box]
+
+  A_1 -> B_1 [color=red]
+  B_1 -> C_1 [color=red]
+ }
+ subgraph cluster_gc_1 {
+  label = "Collect A";
+  A_2 [label="A" shape = box color=lightgray]
+  B_2 [label="B" shape = box]
+  C_2 [label="C" shape = box]
+
+  A_2 -> B_2 [color=lightgrey]
+  B_2 -> C_2 [color=red]
+ }
+ subgraph cluster_gc_2 {
+  label = "Collect B";
+  A_3 [label="A" shape = box color=lightgray]
+  B_3 [label="B" shape = box color=lightgray]
+  C_3 [label="C" shape = box]
+
+  A_3 -> B_3 [color=lightgrey]
+  B_3 -> C_3 [color=lightgray]
+ }
+ subgraph cluster_gc_3 {
+  label = "Collect C";
+  A_4 [label="A" shape = box color=lightgray]
+  B_4 [label="B" shape = box color=lightgray]
+  C_4 [label="C" shape = box color=lightgray]
+
+  A_4 -> B_4 [color=lightgrey]
+  B_4 -> C_4 [color=lightgray]
+ }
+}
+#+END_SRC
+
+#+RESULTS:
+[[file:diagram_gc.svg]]
 
 Now, what happens when A, B, and C are C structs which have been
 wrapped in Ruby objects? Well, now our hard references are just
@@ -91,44 +134,117 @@ marked links.
 
 #+BEGIN_SRC dot :file diagram2.svg :exports results
 digraph D {
- rankdir="LR";
+ subgraph cluster_before {
+  label = "Before GC";
+  A_1 [label="A" shape = box]
+  B_1 [label="B" shape = box]
+  C_1 [label="C" shape = box]
 
- A [shape = box color = red]
- B [shape = box]
- C [shape = box]
+  A_1 -> B_1 [color=purple]
+  B_1 -> C_1 [color=purple]
+ }
+ subgraph cluster_gc_1 {
+  label = "Collect A";
+  A_2 [label="A" shape = box color=lightgray]
+  B_2 [label="B" shape = box]
+  C_2 [label="C" shape = box]
 
- A -> B [color=purple]
- B -> C [color=purple]
+  A_2 -> B_2 [color=lightgrey]
+  B_2 -> C_2 [color=purple]
+ }
+ subgraph cluster_gc_2 {
+  label = "Collect B";
+  A_3 [label="A" shape = box color=lightgray]
+  B_3 [label="B" shape = box color=lightgray]
+  C_3 [label="C" shape = box]
+
+  A_3 -> B_3 [color=lightgrey]
+  B_3 -> C_3 [color=lightgray]
+ }
+ subgraph cluster_gc_3 {
+  label = "Collect C";
+  A_4 [label="A" shape = box color=lightgray]
+  B_4 [label="B" shape = box color=lightgray]
+  C_4 [label="C" shape = box color=lightgray]
+
+  A_4 -> B_4 [color=lightgrey]
+  B_4 -> C_4 [color=lightgray]
+ }
 }
 #+END_SRC
 
 #+RESULTS:
-[[diagram2.svg]]
+[[file:diagram2.svg]]
 
 So in this situation if A stops marking B, or B stops marking C, or A
-ceases to be a GC root then those objects can be collected.
+ceases to be a GC root then those objects can be collected, just as
+they were above.
 
 Now what happens in TruffleRuby when we use handles?
 
 #+BEGIN_SRC dot :file diagram3.svg :exports results
 digraph D {
- rankdir="LR";
+ subgraph cluster_before {
+  label = "Before GC";
 
- X [label="Handle table" shape=box color = red]
- A [shape = box color = red]
- B [shape = box]
- C [shape = box]
+  X_1 [label="Handle table" shape=box color = red]
+  A_1 [label="A" shape = box color = red]
+  B_1 [label="B" shape = box]
+  C_1 [label="C" shape = box]
 
- A -> B [color=blue]
- B -> C [color=blue]
+  A_1 -> B_1 [color=blue]
+  B_1 -> C_1 [color=blue]
 
- X -> B [color=red]
- X -> C [color=red]
+  X_1 -> B_1 [color=red]
+  X_1 -> C_1 [color=red]
+ }
+ subgraph cluster_gc_1 {
+  label = "Collect A";
+
+  X_2 [label="Handle table" shape=box color = red]
+  A_2 [label="A" shape = box color = lightgrey]
+  B_2 [label="B" shape = box]
+  C_2 [label="C" shape = box]
+
+  A_2 -> B_2 [color=lightgrey]
+  B_2 -> C_2 [color=blue]
+
+  X_2 -> B_2 [color=red]
+  X_2 -> C_2 [color=red]
+ }
+ subgraph cluster_gc_2 {
+  label = "Release handle to B";
+
+  X_3 [label="Handle table" shape=box color = red]
+  A_3 [label="A" shape = box color = lightgrey]
+  B_3 [label="B" shape = box color = lightgrey]
+  C_3 [label="C" shape = box]
+
+  A_3 -> B_3 [color=lightgrey]
+  B_3 -> C_3 [color=lightgrey]
+
+  X_3 -> B_3 [color=lightgrey]
+  X_3 -> C_3 [color=red]
+ }
+ subgraph cluster_gc_3 {
+  label = "Release handle to C";
+
+  X_4 [label="Handle table" shape=box color = red]
+  A_4 [label="A" shape = box color = lightgrey]
+  B_4 [label="B" shape = box color = lightgrey]
+  C_4 [label="C" shape = box color = lightgrey]
+
+  A_4 -> B_4 [color=lightgrey]
+  B_4 -> C_4 [color=lightgrey]
+
+  X_4 -> B_4 [color=lightgrey]
+  X_4 -> C_4 [color=lightgrey]
+ }
 }
 #+END_SRC
 
 #+RESULTS:
-[[diagram3.svg]]
+[[file:diagram3.svg]]
 
 Now we have a problem. The references from A to B, and B to C are weak
 (they are simple handle numbers) so the handle table has to associate
@@ -144,31 +260,77 @@ structure of objects.
 
 #+BEGIN_SRC dot :file diagram4.svg :exports results
 digraph D {
- rankdir="LR";
+ subgraph cluster_before {
+  label = "Before GC";
 
- Object [shape = box color = red]
+ Object_1 [label="Object" shape = box color = red]
 
- Document [shape = box]
- NodeA [shape = box]
- NodeB [shape = box]
- NodeC [shape = box]
- NodeD [shape = box]
+ Document_1 [label="Document" shape = box]
+ NodeA_1 [label="NodeA" shape = box]
+ NodeB_1 [label="NodeB" shape = box]
+ NodeC_1 [label="NodeC" shape = box]
+ NodeD_1 [label="NodeD" shape = box]
 
- Object -> Document [color=red]
- Document -> NodeA [color=red]
- NodeA -> NodeB [color=red]
- NodeA -> NodeC [color=red]
- Document -> NodeD [color=red]
+ Object_1 -> Document_1 [color=red]
+ Document_1 -> NodeA_1 [color=red]
+ NodeA_1 -> NodeB_1 [color=red]
+ NodeA_1 -> NodeC_1 [color=red]
+ Document_1 -> NodeD_1 [color=red]
 
- NodeA -> Document [color=red]
- NodeB -> Document [color=red]
- NodeC -> Document [color=red]
- NodeD -> Document [color=red]
+ NodeA_1 -> Document_1 [color=red]
+ NodeB_1 -> Document_1 [color=red]
+ NodeC_1 -> Document_1 [color=red]
+ NodeD_1 -> Document_1 [color=red]
+}
+ subgraph cluster_gc_1 {
+  label = "Collect Object";
+
+ Object_2 [label="Object" shape = box color = lightgrey]
+
+ Document_2 [label="Document" shape = box]
+ NodeA_2 [label="NodeA" shape = box]
+ NodeB_2 [label="NodeB" shape = box]
+ NodeC_2 [label="NodeC" shape = box]
+ NodeD_2 [label="NodeD" shape = box]
+
+ Object_2 -> Document_2 [color=lightgrey]
+ Document_2 -> NodeA_2 [color=red]
+ NodeA_2 -> NodeB_2 [color=red]
+ NodeA_2 -> NodeC_2 [color=red]
+ Document_2 -> NodeD_2 [color=red]
+
+ NodeA_2 -> Document_2 [color=red]
+ NodeB_2 -> Document_2 [color=red]
+ NodeC_2 -> Document_2 [color=red]
+ NodeD_2 -> Document_2 [color=red]
+}
+ subgraph cluster_gc_2 {
+  label = "Collect Document";
+
+ Object_3 [label="Object" shape = box color = lightgrey]
+
+ Document_3 [label="Document" shape = box color=lightgrey]
+ NodeA_3 [label="NodeA" shape = box color=lightgrey]
+ NodeB_3 [label="NodeB" shape = box color=lightgrey]
+ NodeC_3 [label="NodeC" shape = box color=lightgrey]
+ NodeD_3 [label="NodeD" shape = box color=lightgrey]
+
+ Object_3 -> Document_3 [color=lightgrey]
+ Document_3 -> NodeA_3 [color=lightgrey]
+ NodeA_3 -> NodeB_3 [color=lightgrey]
+ NodeA_3 -> NodeC_3 [color=lightgrey]
+ Document_3 -> NodeD_3 [color=lightgrey]
+
+ NodeA_3 -> Document_3 [color=lightgrey]
+ NodeB_3 -> Document_3 [color=lightgrey]
+ NodeC_3 -> Document_3 [color=lightgrey]
+ NodeD_3 -> Document_3 [color=lightgrey]
+}
 }
 #+END_SRC
 
 #+RESULTS:
-[[diagram4.svg]]
+[[file:diagram4.svg]]
 
 This is a common sort of structure to find in tools like XML
 processors. Each node has a reference to the parent document, and to
@@ -179,50 +341,108 @@ but what happens if we use handles?
 
 #+BEGIN_SRC dot :file diagram5.svg :exports results
 digraph D {
- rankdir="LR";
+ subgraph cluster_before {
+  label = "Before GC";
 
- Object [shape = box color = red]
- X [label="Handle table" shape=box color = red]
+ Object_1 [label="Object" shape = box color = red]
+ X_1 [label="Handle table" shape=box color = red]
 
- Document [shape = box]
- NodeA [shape = box]
- NodeB [shape = box]
- NodeC [shape = box]
- NodeD [shape = box]
+ Document_1 [label="Document" shape = box]
+ NodeA_1 [label="NodeA" shape = box]
+ NodeB_1 [label="NodeB" shape = box]
+ NodeC_1 [label="NodeC" shape = box]
+ NodeD_1 [label="NodeD" shape = box]
 
- Object -> Document  [color=blue]
- Document -> NodeA [color=blue]
- NodeA -> NodeB [color=blue]
- NodeA -> NodeC [color=blue]
- Document -> NodeD [color=blue]
+ Object_1 -> Document_1  [color=blue]
+ Document_1 -> NodeA_1 [color=blue]
+ NodeA_1 -> NodeB_1 [color=blue]
+ NodeA_1 -> NodeC_1 [color=blue]
+ Document_1 -> NodeD_1 [color=blue]
 
- NodeA -> Document [color=blue]
- NodeB -> Document [color=blue]
- NodeC -> Document [color=blue]
- NodeD -> Document [color=blue]
+ NodeA_1 -> Document_1 [color=blue]
+ NodeB_1 -> Document_1 [color=blue]
+ NodeC_1 -> Document_1 [color=blue]
+ NodeD_1 -> Document_1 [color=blue]
 
- X -> Document [color=red]
- X -> NodeA [color=red]
- X -> NodeB [color=red]
- X -> NodeC [color=red]
- X -> NodeD [color=red]
+ X_1 -> Document_1 [color=red]
+ X_1 -> NodeA_1 [color=red]
+ X_1 -> NodeB_1 [color=red]
+ X_1 -> NodeC_1 [color=red]
+ X_1 -> NodeD_1 [color=red]
+}
+ subgraph cluster_gc_1 {
+  label = "Collect Object";
+
+ Object_2 [label="Object" shape = box color = lightgrey]
+ X_2 [label="Handle table" shape=box color = red]
+
+ Document_2 [label="Document" shape = box]
+ NodeA_2 [label="NodeA" shape = box]
+ NodeB_2 [label="NodeB" shape = box]
+ NodeC_2 [label="NodeC" shape = box]
+ NodeD_2 [label="NodeD" shape = box]
+
+ Object_2 -> Document_2  [color=lightgrey]
+ Document_2 -> NodeA_2 [color=blue]
+ NodeA_2 -> NodeB_2 [color=blue]
+ NodeA_2 -> NodeC_2 [color=blue]
+ Document_2 -> NodeD_2 [color=blue]
+
+ NodeA_2 -> Document_2 [color=blue]
+ NodeB_2 -> Document_2 [color=blue]
+ NodeC_2 -> Document_2 [color=blue]
+ NodeD_2 -> Document_2 [color=blue]
+
+ X_2 -> Document_2 [color=red]
+ X_2 -> NodeA_2 [color=red]
+ X_2 -> NodeB_2 [color=red]
+ X_2 -> NodeC_2 [color=red]
+ X_2 -> NodeD_2 [color=red]
+}
+ subgraph cluster_gc_2 {
+  label = "Release handle to Document";
+
+ Object_3 [label="Object" shape = box color = lightgrey]
+ X_3 [label="Handle table" shape=box color = red]
+
+ Document_3 [label="Document" shape = box]
+ NodeA_3 [label="NodeA" shape = box]
+ NodeB_3 [label="NodeB" shape = box]
+ NodeC_3 [label="NodeC" shape = box]
+ NodeD_3 [label="NodeD" shape = box]
+
+ Object_3 -> Document_3  [color=lightgrey]
+ Document_3 -> NodeA_3 [color=blue]
+ NodeA_3 -> NodeB_3 [color=blue]
+ NodeA_3 -> NodeC_3 [color=blue]
+ Document_3 -> NodeD_3 [color=blue]
+
+ NodeA_3 -> Document_3 [color=blue]
+ NodeB_3 -> Document_3 [color=blue]
+ NodeC_3 -> Document_3 [color=blue]
+ NodeD_3 -> Document_3 [color=blue]
+
+ X_3 -> Document_3 [color=red]
+ X_3 -> NodeA_3 [color=red]
+ X_3 -> NodeB_3 [color=red]
+ X_3 -> NodeC_3 [color=red]
+ X_3 -> NodeD_3 [color=red]
+}
 }
 #+END_SRC
 
 #+RESULTS:
-[[diagram5.svg]]
+[[file:diagram5.svg]]
 
 Well, our diagram has certainly got messier! But it's also hard to
-know how we should free those handles nicely. There doesn't seem to be
-a nice obvious order in which we could do it, and Object ceasing to
-be a GC root won't be enough to free the structure even with
-finalisers because even when object release its handle on document
-there are still all the children holding handles for it, so the whole
-structure is still reachable from the handle table. We could solve
-almost any situation like this by introducing weak handles, but that
-requires patching each C extension, and carefully analysing how to
-break these cycles. To really be compatible we need a different
-approach.
+know how we should free those objects nicely. Release the handle that
+Object held to Document doesn't help, because other handles exist
+pointing to it from the nodes, so the whole cluster remains
+uncollected. There doesn't seem to be a nice obvious order in which we
+could do it. We could solve almost any situation like this by
+introducing weak handles, but that requires patching each C extension,
+and carefully analysing how to break these cycles. To really be
+compatible we need a different approach.
 * C extensions the new way
 Our previous approach was enough to get several key C extensions
 working, but sometimes they required large patches, and avoiding
@@ -274,10 +494,10 @@ full we'll run any marking functions associated with live objects and
 attach lists of marked objects to their owners.
 * Testing the new approach and what's next?
 I said at the start of this article that we used to have to patch C
-extensions, so how much has our compatiblity improved; does this new
-approach perofrm well or is more work required to make it fast; and
+extensions, so how much has our compatibility improved; does this new
+approach perform well or is more work required to make it fast; and
 what are our next steps?
-** Compatiblity
+** Compatibility
 [[https://github.com/oracle/truffleruby/commit/1915b9a4][130 additions, and 1,402 deletions]] is the best kind of commit to be
 able to merge. This new approach has allowed us to remove almost
 all our patches for C extensions, even for complex ones such as zlib,
@@ -296,7 +516,7 @@ native. This requires storing the contents in native memory so that
 they can be read and altered from C, but ensuring that the view of the
 array from Ruby remains consistent with any changes made via a C
 extension. The work to support this is in progress and we expect to
-resolve this area of incompatiblity very soon.
+resolve this area of incompatibility very soon.
 *** Calling functions with the wrong arguments
 There are also some small differences imposed by our use of Sulong to
 interpret C extensions. One is function declarations may need to be
