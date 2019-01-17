@@ -49,36 +49,36 @@
 <h2>Table of Contents</h2>
 <div id="text-table-of-contents">
 <ul>
-<li><a href="#org9778658">1. Interactions between Truffle languages</a></li>
-<li><a href="#orgcc8b959">2. C extensions the old way</a>
+<li><a href="#org6d50c08">1. Interactions between Truffle languages</a></li>
+<li><a href="#org41e4027">2. C extensions the old way</a>
 <ul>
-<li><a href="#orgc7cc475">2.1. Managed memory</a></li>
-<li><a href="#orgdd87a30">2.2. Handles everywhere</a></li>
+<li><a href="#org0f9987a">2.1. Managed memory</a></li>
+<li><a href="#org9caf9b7">2.2. Handles everywhere</a></li>
 </ul>
 </li>
-<li><a href="#org22e7398">3. Difficult issues with our old approach</a></li>
-<li><a href="#orgfb3cdef">4. C extensions the new way</a>
+<li><a href="#org3879382">3. Difficult issues with our old approach</a></li>
+<li><a href="#orgbc59892">4. C extensions the new way</a>
 <ul>
-<li><a href="#orgb991bd5">4.1. Wrapping and unwrapping</a></li>
-<li><a href="#org584a6b2">4.2. Tidying up wrappers</a></li>
-<li><a href="#orgf57a939">4.3. Keeping objects alive in MRI</a></li>
-<li><a href="#org6def33a">4.4. Periodic marking</a></li>
+<li><a href="#org5474731">4.1. Wrapping and unwrapping</a></li>
+<li><a href="#orge4b7195">4.2. Tidying up wrappers</a></li>
+<li><a href="#org039655f">4.3. Keeping objects alive in MRI</a></li>
+<li><a href="#org3aec44b">4.4. Periodic marking</a></li>
 </ul>
 </li>
-<li><a href="#orgbbe6bf1">5. Testing the new approach and what's next?</a>
+<li><a href="#org7e4bf14">5. Testing the new approach and what's next?</a>
 <ul>
-<li><a href="#org786faa4">5.1. Compatiblity</a>
+<li><a href="#orgb519b1b">5.1. Compatibility</a>
 <ul>
-<li><a href="#org0962b7e">5.1.1. The type of <code>VALUE</code></a></li>
-<li><a href="#orgdddf80e">5.1.2. <code>RARRAY_PTR</code></a></li>
-<li><a href="#orge0bfcdd">5.1.3. Calling functions with the wrong arguments</a></li>
+<li><a href="#org9b6b438">5.1.1. The type of <code>VALUE</code></a></li>
+<li><a href="#orgb4bd554">5.1.2. <code>RARRAY_PTR</code></a></li>
+<li><a href="#org37368f9">5.1.3. Calling functions with the wrong arguments</a></li>
 </ul>
 </li>
-<li><a href="#org977180d">5.2. Performance</a></li>
-<li><a href="#org2380120">5.3. What's next?</a></li>
+<li><a href="#orgbe383b7">5.2. Performance</a></li>
+<li><a href="#org669946b">5.3. What's next?</a></li>
 </ul>
 </li>
-<li><a href="#orge1b47a6">6. Conclusion</a></li>
+<li><a href="#org0e91144">6. Conclusion</a></li>
 </ul>
 </div>
 </div>
@@ -98,8 +98,8 @@ Truffle based languages can support polyglot calls, how C extensions
 used to work in TruffleRuby, how they now work, and what the remaining
 differences are with MRI.
 </p>
-<div id="outline-container-org9778658" class="outline-2">
-<h2 id="org9778658"><span class="section-number-2">1</span> Interactions between Truffle languages</h2>
+<div id="outline-container-org6d50c08" class="outline-2">
+<h2 id="org6d50c08"><span class="section-number-2">1</span> Interactions between Truffle languages</h2>
 <div class="outline-text-2" id="text-1">
 <p>
 All Truffle languages can provide support for other languages to
@@ -122,13 +122,13 @@ These facilities don't cover everything though, so Sulong provides a
 set of functions for converting almost any object into a native handle
 and back again. I say almost any object because boxed primitives such
 as <code>java.lang.Integer</code> are not supported, but you can always arrange
-to wrap these in in an object that is supported (and unwrap them again
+to wrap these in an object that is supported (and unwrap them again
 when converting back from handles) to avoid the problem.
 </p>
 </div>
 </div>
-<div id="outline-container-orgcc8b959" class="outline-2">
-<h2 id="orgcc8b959"><span class="section-number-2">2</span> C extensions the old way</h2>
+<div id="outline-container-org41e4027" class="outline-2">
+<h2 id="org41e4027"><span class="section-number-2">2</span> C extensions the old way</h2>
 <div class="outline-text-2" id="text-2">
 <p>
 We used Truffle's polyglot features to call C functions from Ruby, and
@@ -139,8 +139,8 @@ shared library or stored on the native heap. To solve that problem we
 would patch C extensions in two ways.
 </p>
 </div>
-<div id="outline-container-orgc7cc475" class="outline-3">
-<h3 id="orgc7cc475"><span class="section-number-3">2.1</span> Managed memory</h3>
+<div id="outline-container-org0f9987a" class="outline-3">
+<h3 id="org0f9987a"><span class="section-number-3">2.1</span> Managed memory</h3>
 <div class="outline-text-3" id="text-2-1">
 <p>
 The first way to avoid problems with the translation of Ruby objects to
@@ -153,8 +153,8 @@ nested members of fused arrays.
 </p>
 </div>
 </div>
-<div id="outline-container-orgdd87a30" class="outline-3">
-<h3 id="orgdd87a30"><span class="section-number-3">2.2</span> Handles everywhere</h3>
+<div id="outline-container-org9caf9b7" class="outline-3">
+<h3 id="org9caf9b7"><span class="section-number-3">2.2</span> Handles everywhere</h3>
 <div class="outline-text-3" id="text-2-2">
 <p>
 The second way to solve these problems was to use the functions Sulong
@@ -166,13 +166,13 @@ needed to be converted to or from native memory.
 </div>
 </div>
 </div>
-<div id="outline-container-org22e7398" class="outline-2">
-<h2 id="org22e7398"><span class="section-number-2">3</span> Difficult issues with our old approach</h2>
+<div id="outline-container-org3879382" class="outline-2">
+<h2 id="org3879382"><span class="section-number-2">3</span> Difficult issues with our old approach</h2>
 <div class="outline-text-2" id="text-3">
 <p>
 So, there are a couple of issues with the old approach and resource
 leaks. Let's take a look at the behaviour we would like, the problems
-we could see with the old approach, and how we what we could do to fix
+we could see with the old approach, and what we could do to fix
 those. We'll start by considering a simple case of three objects A, B,
 and C. A will be a GC root (i.e. it's either some sort of global
 object or a variable which the garbage collector knows cannot be
@@ -188,11 +188,18 @@ Sorry, your browser does not support SVG.</object>
 </div>
 
 <p>
-We'll use red arrows to indicate hard references from now on,m and red
+We'll use red arrows to indicate hard references from now on, and red
 boxes to indicate GC roots. The good thing here is that if A stops
 being a root, or a hard reference is removed then some or all of the
 objects can be collected.
 </p>
+
+
+<div class="figure">
+<p><object type="image/svg+xml" data="diagram_gc.svg" class="org-svg">
+Sorry, your browser does not support SVG.</object>
+</p>
+</div>
 
 <p>
 Now, what happens when A, B, and C are C structs which have been
@@ -211,7 +218,8 @@ Sorry, your browser does not support SVG.</object>
 
 <p>
 So in this situation if A stops marking B, or B stops marking C, or A
-ceases to be a GC root then those objects can be collected.
+ceases to be a GC root then those objects can be collected, just as
+they were above.
 </p>
 
 <p>
@@ -266,21 +274,19 @@ Sorry, your browser does not support SVG.</object>
 
 <p>
 Well, our diagram has certainly got messier! But it's also hard to
-know how we should free those handles nicely. There doesn't seem to be
-a nice obvious order in which we could do it, and Object ceasing to
-be a GC root won't be enough to free the structure even with
-finalisers because even when object release its handle on document
-there are still all the children holding handles for it, so the whole
-structure is still reachable from the handle table. We could solve
-almost any situation like this by introducing weak handles, but that
-requires patching each C extension, and carefully analysing how to
-break these cycles. To really be compatible we need a different
-approach.
+know how we should free those objects nicely. Release the handle that
+Object held to Document doesn't help, because other handles exist
+pointing to it from the nodes, so the whole cluster remains
+uncollected. There doesn't seem to be a nice obvious order in which we
+could do it. We could solve almost any situation like this by
+introducing weak handles, but that requires patching each C extension,
+and carefully analysing how to break these cycles. To really be
+compatible we need a different approach.
 </p>
 </div>
 </div>
-<div id="outline-container-orgfb3cdef" class="outline-2">
-<h2 id="orgfb3cdef"><span class="section-number-2">4</span> C extensions the new way</h2>
+<div id="outline-container-orgbc59892" class="outline-2">
+<h2 id="orgbc59892"><span class="section-number-2">4</span> C extensions the new way</h2>
 <div class="outline-text-2" id="text-4">
 <p>
 Our previous approach was enough to get several key C extensions
@@ -292,8 +298,8 @@ both these approaches had issues. So we tried a third approach,
 wrapping every Ruby object.
 </p>
 </div>
-<div id="outline-container-orgb991bd5" class="outline-3">
-<h3 id="orgb991bd5"><span class="section-number-3">4.1</span> Wrapping and unwrapping</h3>
+<div id="outline-container-org5474731" class="outline-3">
+<h3 id="org5474731"><span class="section-number-3">4.1</span> Wrapping and unwrapping</h3>
 <div class="outline-text-3" id="text-4-1">
 <p>
 The idea is fairly simple. C extensions will never see raw Ruby
@@ -307,8 +313,8 @@ our C code to wrap and unwrap values that is as far as the changes go.
 </p>
 </div>
 </div>
-<div id="outline-container-org584a6b2" class="outline-3">
-<h3 id="org584a6b2"><span class="section-number-3">4.2</span> Tidying up wrappers</h3>
+<div id="outline-container-orge4b7195" class="outline-3">
+<h3 id="orge4b7195"><span class="section-number-3">4.2</span> Tidying up wrappers</h3>
 <div class="outline-text-3" id="text-4-2">
 <p>
 It was also important that these wrappers didn't cause the objects
@@ -322,8 +328,8 @@ mustn't be collected too soon.
 </p>
 </div>
 </div>
-<div id="outline-container-orgf57a939" class="outline-3">
-<h3 id="orgf57a939"><span class="section-number-3">4.3</span> Keeping objects alive in MRI</h3>
+<div id="outline-container-org039655f" class="outline-3">
+<h3 id="org039655f"><span class="section-number-3">4.3</span> Keeping objects alive in MRI</h3>
 <div class="outline-text-3" id="text-4-3">
 <p>
 MRI keeps objects alive in two ways when they are being used in a C
@@ -341,8 +347,8 @@ the stack which should also keep their respective objects alive.
 </p>
 </div>
 </div>
-<div id="outline-container-org6def33a" class="outline-3">
-<h3 id="org6def33a"><span class="section-number-3">4.4</span> Periodic marking</h3>
+<div id="outline-container-org3aec44b" class="outline-3">
+<h3 id="org3aec44b"><span class="section-number-3">4.4</span> Periodic marking</h3>
 <div class="outline-text-3" id="text-4-4">
 <p>
 We can solve this by keeping two lists of objects that need to be kept
@@ -358,18 +364,18 @@ attach lists of marked objects to their owners.
 </div>
 </div>
 </div>
-<div id="outline-container-orgbbe6bf1" class="outline-2">
-<h2 id="orgbbe6bf1"><span class="section-number-2">5</span> Testing the new approach and what's next?</h2>
+<div id="outline-container-org7e4bf14" class="outline-2">
+<h2 id="org7e4bf14"><span class="section-number-2">5</span> Testing the new approach and what's next?</h2>
 <div class="outline-text-2" id="text-5">
 <p>
 I said at the start of this article that we used to have to patch C
-extensions, so how much has our compatiblity improved; does this new
-approach perofrm well or is more work required to make it fast; and
+extensions, so how much has our compatibility improved; does this new
+approach perform well or is more work required to make it fast; and
 what are our next steps?
 </p>
 </div>
-<div id="outline-container-org786faa4" class="outline-3">
-<h3 id="org786faa4"><span class="section-number-3">5.1</span> Compatiblity</h3>
+<div id="outline-container-orgb519b1b" class="outline-3">
+<h3 id="orgb519b1b"><span class="section-number-3">5.1</span> Compatibility</h3>
 <div class="outline-text-3" id="text-5-1">
 <p>
 <a href="https://github.com/oracle/truffleruby/commit/1915b9a4">130 additions, and 1,402 deletions</a> is the best kind of commit to be
@@ -384,8 +390,8 @@ still some fundamental differences between us and MRI, but they are
 much smaller than they were.
 </p>
 </div>
-<div id="outline-container-org0962b7e" class="outline-4">
-<h4 id="org0962b7e"><span class="section-number-4">5.1.1</span> The type of <code>VALUE</code></h4>
+<div id="outline-container-org9b6b438" class="outline-4">
+<h4 id="org9b6b438"><span class="section-number-4">5.1.1</span> The type of <code>VALUE</code></h4>
 <div class="outline-text-4" id="text-5-1-1">
 <p>
 One is that our <code>VALUE</code> type is a <code>void *</code> in C. This means we can't
@@ -394,8 +400,8 @@ tries to do that.
 </p>
 </div>
 </div>
-<div id="outline-container-orgdddf80e" class="outline-4">
-<h4 id="orgdddf80e"><span class="section-number-4">5.1.2</span> <code>RARRAY_PTR</code></h4>
+<div id="outline-container-orgb4bd554" class="outline-4">
+<h4 id="orgb4bd554"><span class="section-number-4">5.1.2</span> <code>RARRAY_PTR</code></h4>
 <div class="outline-text-4" id="text-5-1-2">
 <p>
 We also can't yet translate a pointer to a Ruby array's contents to
@@ -403,12 +409,12 @@ native. This requires storing the contents in native memory so that
 they can be read and altered from C, but ensuring that the view of the
 array from Ruby remains consistent with any changes made via a C
 extension. The work to support this is in progress and we expect to
-resolve this area of incompatiblity very soon.
+resolve this area of incompatibility very soon.
 </p>
 </div>
 </div>
-<div id="outline-container-orge0bfcdd" class="outline-4">
-<h4 id="orge0bfcdd"><span class="section-number-4">5.1.3</span> Calling functions with the wrong arguments</h4>
+<div id="outline-container-org37368f9" class="outline-4">
+<h4 id="org37368f9"><span class="section-number-4">5.1.3</span> Calling functions with the wrong arguments</h4>
 <div class="outline-text-4" id="text-5-1-3">
 <p>
 There are also some small differences imposed by our use of Sulong to
@@ -424,8 +430,8 @@ behaviour of any C extensions.
 </div>
 </div>
 </div>
-<div id="outline-container-org977180d" class="outline-3">
-<h3 id="org977180d"><span class="section-number-3">5.2</span> Performance</h3>
+<div id="outline-container-orgbe383b7" class="outline-3">
+<h3 id="orgbe383b7"><span class="section-number-3">5.2</span> Performance</h3>
 <div class="outline-text-3" id="text-5-2">
 <p>
 Translating between Ruby objects and native pointers requires updating
@@ -453,8 +459,8 @@ performance in this area.
 </p>
 </div>
 </div>
-<div id="outline-container-org2380120" class="outline-3">
-<h3 id="org2380120"><span class="section-number-3">5.3</span> What's next?</h3>
+<div id="outline-container-org669946b" class="outline-3">
+<h3 id="org669946b"><span class="section-number-3">5.3</span> What's next?</h3>
 <div class="outline-text-3" id="text-5-3">
 <p>
 As I mentioned above we're still working on some changes to improve
@@ -468,8 +474,8 @@ these.
 </div>
 </div>
 </div>
-<div id="outline-container-orge1b47a6" class="outline-2">
-<h2 id="orge1b47a6"><span class="section-number-2">6</span> Conclusion</h2>
+<div id="outline-container-org0e91144" class="outline-2">
+<h2 id="org0e91144"><span class="section-number-2">6</span> Conclusion</h2>
 <div class="outline-text-2" id="text-6">
 <p>
 These changes will come out out as part of next GraalVM release

@@ -37,8 +37,8 @@
 </g>
 <!-- A_1&#45;&gt;B_1 -->
 <g id="edge1" class="edge"><title>A_1&#45;&gt;B_1</title>
-<path fill="none" stroke="purple" d="M46,-159.697C46,-151.983 46,-142.712 46,-134.112"/>
-<polygon fill="purple" stroke="purple" points="49.5001,-134.104 46,-124.104 42.5001,-134.104 49.5001,-134.104"/>
+<path fill="none" stroke="red" d="M46,-159.697C46,-151.983 46,-142.712 46,-134.112"/>
+<polygon fill="red" stroke="red" points="49.5001,-134.104 46,-124.104 42.5001,-134.104 49.5001,-134.104"/>
 </g>
 <!-- C_1 -->
 <g id="node3" class="node"><title>C_1</title>
@@ -47,8 +47,8 @@
 </g>
 <!-- B_1&#45;&gt;C_1 -->
 <g id="edge2" class="edge"><title>B_1&#45;&gt;C_1</title>
-<path fill="none" stroke="purple" d="M46,-87.6966C46,-79.9827 46,-70.7125 46,-62.1124"/>
-<polygon fill="purple" stroke="purple" points="49.5001,-62.1043 46,-52.1043 42.5001,-62.1044 49.5001,-62.1043"/>
+<path fill="none" stroke="red" d="M46,-87.6966C46,-79.9827 46,-70.7125 46,-62.1124"/>
+<polygon fill="red" stroke="red" points="49.5001,-62.1043 46,-52.1043 42.5001,-62.1044 49.5001,-62.1043"/>
 </g>
 <!-- A_2 -->
 <g id="node4" class="node"><title>A_2</title>
@@ -72,8 +72,8 @@
 </g>
 <!-- B_2&#45;&gt;C_2 -->
 <g id="edge4" class="edge"><title>B_2&#45;&gt;C_2</title>
-<path fill="none" stroke="purple" d="M127,-87.6966C127,-79.9827 127,-70.7125 127,-62.1124"/>
-<polygon fill="purple" stroke="purple" points="130.5,-62.1043 127,-52.1043 123.5,-62.1044 130.5,-62.1043"/>
+<path fill="none" stroke="red" d="M127,-87.6966C127,-79.9827 127,-70.7125 127,-62.1124"/>
+<polygon fill="red" stroke="red" points="130.5,-62.1043 127,-52.1043 123.5,-62.1044 130.5,-62.1043"/>
 </g>
 <!-- A_3 -->
 <g id="node7" class="node"><title>A_3</title>
