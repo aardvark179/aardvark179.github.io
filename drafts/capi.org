@@ -1,5 +1,10 @@
 #+TITLE: Better support for C extensions in TruffleRuby.
 #+DATE: 2018-12-31 Mon
+We think it is crucial that any alternative Ruby implementation aiming
+to be fully compatible with MRI runs the C extensions. TruffleRuby's
+compatibility was recently significantly improved, with much better
+support that almost completely removes the need to patch C extensions.
+
 We've been able to support C extensions in TruffleRuby for a long time
 now, but we've always had to patch them while building the C for them
 to work. We've just added much better support which almost completely
@@ -13,7 +18,7 @@ access data and make calls by defining how foreign access is
 resolved. This covers things like asking if an object is executable,
 or has a size, reading and writing public accessible fields, and so
 forth. So JavaScript can easily call methods on a Ruby object, or
-access members of a Ruby array as long we we provide foreign access
+access members of a Ruby array as long as we provide foreign access
 for Ruby objects.
 
 There is also support for lower level concepts in the foreign access
@@ -21,17 +26,18 @@ APIs.  You can convert an object to a native representation, as well
 as checking whether that object can behave like a pointer.
 
 These facilities don't cover everything though, so Sulong provides a
-set of functions for converting almsot any object into a native handle
+set of functions for converting almost any object into a native handle
 and back again. I say almost any object because boxed primitives such
 as ~java.lang.Integer~ are not supported, but you can always arrange
-to wrap these to avoid the problem.
+to wrap these in in an object that is supported (and unwrap them again
+when converting back from handles) to avoid the problem.
 * C extensions the old way
 We used Truffle's polyglot features to call C functions from Ruby, and
 Ruby methods from C, without touching the arguments at all. This
 allowed Ruby objects to pass easily through C code that is interpreted
 by Sulong, but fails if those objects have to be passed to a native
 shared library or stored on the native heap. To solve that problem we
-would patch C extensions in too ways.
+would patch C extensions in two ways.
 ** Managed memory
 The first way to avoid problems with the translation of Ruby objects to
 native pointers is to avoid doing as much as possible. By default we'd
@@ -78,7 +84,7 @@ being a root, or a hard reference is removed then some or all of the
 objects can be collected.
 
 Now, what happens when A, B, and C are C structs which have been
-wrapped in Ruby objects? Well, now our hard references are jst
+wrapped in Ruby objects? Well, now our hard references are just
 ~VALUEs~ in the structs, and for the GC to know those are alive each
 object must mark those it has references to. We'll use purple to mark
 marked links.
@@ -208,7 +214,7 @@ digraph D {
 
 Well, our diagram has certainly got messier! But it's also hard to
 know how we should free those handles nicely. There doesn't seem to be
-a nice obvious order in which we coiuld do it, and Object ceasing to
+a nice obvious order in which we could do it, and Object ceasing to
 be a GC root won't be enough to free the structure even with
 finalisers because even when object release its handle on document
 there are still all the children holding handles for it, so the whole
@@ -245,9 +251,9 @@ stop it from getting garbage collected at some point, but equally it
 mustn't be collected too soon.
 ** Keeping objects alive in MRI
 MRI keeps objects alive in two ways when they are being used in a C
-extension.Any object still on the stack will be seen by the GC and
+extension. Any object still on the stack will be seen by the GC and
 kept alive, but that isn't enough to preserve values which may have
-been assigned to to a field in a structure. MRI allows these to be
+been assigned to a field in a structure. MRI allows these to be
 kept alive by associating the structure with a Ruby object, and
 allowing that object to mark other it has references to. So, when the
 garbage collector traverses all the objects in your Ruby heap it calls
@@ -265,32 +271,33 @@ can create this list whenever we enter a C extension, and destroy it
 again when we finish the call. The other list is a fixed size buffer
 of every wrapper converted to a pointer. Whenever this list becomes
 full we'll run any marking functions associated with live objects and
-attach a lists of marked objects to their owners.
-* Improved compatibility and remaining differences
-Applying these changes has allowed us to remove almost all our patches
-for C extensions, even for complex ones such as zlib, OpenSSl, or pg,
-but that doesn't mean we're completely finished. Translating between
-Ruby objects and native pointers requires updating a global hash
-table, which is relatively expensive. We can reduce that by tagging
-the pointers for common types, so true, false, nil, and so forth
-always convert to the same native value and never need to touch the
-hash table. Likewise fixnums can be tagged to cover most of their
-range, and we can probably use a similar technique for doubles or
-interned symbols.
+attach lists of marked objects to their owners.
+* Testing the new approach and what's next?
+I said at the start of this article that we used to have to patch C
+extensions, so how much has our compatiblity improved; does this new
+approach perofrm well or is more work required to make it fast; and
+what are our next steps?
+** Compatiblity
+[[https://github.com/oracle/truffleruby/commit/1915b9a4][130 additions, and 1,402 deletions]] is the best kind of commit to be
+able to merge. This new approach has allowed us to remove almost
+all our patches for C extensions, even for complex ones such as zlib,
+OpenSSl, or pg.
 
-There are however still some fundamental differences between us and
-MRI, but they are much smaller than they were. One is that our ~VALUE~
-type is a ~void *~ in C. This means we can't do a switch on a
-~VALUE~. We will experiment with using ~long~ for ~VALUE~, but this
-may require some changes to Sulong for support.
-
+Notice we've only removed /almost/ all patches. There are however
+still some fundamental differences between us and MRI, but they are
+much smaller than they were.
+*** The type of ~VALUE~
+One is that our ~VALUE~ type is a ~void *~ in C. This means we can't
+do a switch on a ~VALUE~, so we do still need to patch anything that
+tries to do that.
+*** ~RARRAY_PTR~
 We also can't yet translate a pointer to a Ruby array's contents to
 native. This requires storing the contents in native memory so that
 they can be read and altered from C, but ensuring that the view of the
-array from Ruby remains consistent with these changes. It's
-technically perfectly possible but will require some work on our array
-code to support it.
-
+array from Ruby remains consistent with any changes made via a C
+extension. The work to support this is in progress and we expect to
+resolve this area of incompatiblity very soon.
+*** Calling functions with the wrong arguments
 There are also some small differences imposed by our use of Sulong to
 interpret C extensions. One is function declarations may need to be
 changed. For example a function declared as taking two arguments must
@@ -298,5 +305,37 @@ be passed two arguments, even if the second one is never used, and
 ~int~ and pointer types may not be as interchangeable as they can be
 in native C. We also have trouble with varargs functions in managed
 code being called from native libraries, but none of these differences
-causes widespread problems and most can be patched without change the
+causes widespread problems and most can be patched without changing the
 behaviour of any C extensions.
+** Performance
+Translating between Ruby objects and native pointers requires updating
+a global hash table, which is relatively expensive. We reduce that
+cost by tagging the pointers for common types, so true, false, nil,
+and so forth always convert to the same native value and never need to
+touch the hash table. Likewise fixnums can be tagged to cover most of
+their range, and we can probably use a similar technique for floating
+point numbers.
+
+We are also doing work to reduce the costs of our GC marking
+technique. We can make an assumptions that GC marking functions are
+not used and avoid those costs as long as we can safely recover as
+soon as markers are introduced, and we can reduce the cost of
+preserving objects on the stack in many situations.
+
+Having applied some of these techniques we have benchmarked repeated
+calls to C extensions being up to 3 times faster than MRI 2.4 in some
+cases, though not yet for all our tests. We'll continue to work no
+performance in this area.
+** What's next?
+As I mentioned above we're still working on some changes to improve
+compatibility even more, and we'll continue to benchmark and improve
+performance. We expect any remaining problems to be related to
+specific functions in the Ruby C APIs rather than being more
+fundamental compatibility issues, and we'll be expanding our testing
+of gems considerably in the near future to help find and resolve
+these.
+* Conclusion
+These changes will come out out as part of next GraalVM release
+candidate. If you use or maintain a C extension then now is great time
+to test it with TruffleRuby. Get in touch with us via [[https://twitter.com/truffleruby?lang=en][twitter]] or
+report issues via our [[https://github.com/oracle/truffleruby][GitHub repo]]
