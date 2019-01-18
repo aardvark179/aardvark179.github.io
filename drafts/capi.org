@@ -555,7 +555,7 @@ fundamental compatibility issues, and we'll be expanding our testing
 of gems considerably in the near future to help find and resolve
 these.
 * Conclusion
-These changes will come out out as part of next GraalVM release
-candidate. If you use or maintain a C extension then now is great time
-to test it with TruffleRuby. Get in touch with us via [[https://twitter.com/truffleruby?lang=en][twitter]] or
-report issues via our [[https://github.com/oracle/truffleruby][GitHub repo]]
+These changes will be coming out as part of next GraalVM release
+(release candidate 12). If you use or maintain a Ruby C extension then
+now is great time to start testing it with TruffleRuby. Get in touch
+with us via [[https://twitter.com/truffleruby?lang=en][twitter]] or [[https://gitter.im/graalvm/truffleruby][Gitter]], or report issues via our [[https://github.com/oracle/truffleruby][GitHub repo]]
