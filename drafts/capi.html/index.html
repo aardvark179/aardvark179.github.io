@@ -49,36 +49,36 @@
 <h2>Table of Contents</h2>
 <div id="text-table-of-contents">
 <ul>
-<li><a href="#org6d50c08">1. Interactions between Truffle languages</a></li>
-<li><a href="#org41e4027">2. C extensions the old way</a>
+<li><a href="#org1886d89">1. Interactions between Truffle languages</a></li>
+<li><a href="#org223503f">2. C extensions the old way</a>
 <ul>
-<li><a href="#org0f9987a">2.1. Managed memory</a></li>
-<li><a href="#org9caf9b7">2.2. Handles everywhere</a></li>
+<li><a href="#orge0e571c">2.1. Managed memory</a></li>
+<li><a href="#org90ace5a">2.2. Handles everywhere</a></li>
 </ul>
 </li>
-<li><a href="#org3879382">3. Difficult issues with our old approach</a></li>
-<li><a href="#orgbc59892">4. C extensions the new way</a>
+<li><a href="#org3b29ebc">3. Difficult issues with our old approach</a></li>
+<li><a href="#orgf9ce310">4. C extensions the new way</a>
 <ul>
-<li><a href="#org5474731">4.1. Wrapping and unwrapping</a></li>
-<li><a href="#orge4b7195">4.2. Tidying up wrappers</a></li>
-<li><a href="#org039655f">4.3. Keeping objects alive in MRI</a></li>
-<li><a href="#org3aec44b">4.4. Periodic marking</a></li>
+<li><a href="#org879c88c">4.1. Wrapping and unwrapping</a></li>
+<li><a href="#orgdf25e32">4.2. Tidying up wrappers</a></li>
+<li><a href="#org1533bee">4.3. Keeping objects alive in MRI</a></li>
+<li><a href="#org6a20fd2">4.4. Periodic marking</a></li>
 </ul>
 </li>
-<li><a href="#org7e4bf14">5. Testing the new approach and what's next?</a>
+<li><a href="#org0125cd4">5. Testing the new approach and what's next?</a>
 <ul>
-<li><a href="#orgb519b1b">5.1. Compatibility</a>
+<li><a href="#orga141c62">5.1. Compatibility</a>
 <ul>
-<li><a href="#org9b6b438">5.1.1. The type of <code>VALUE</code></a></li>
-<li><a href="#orgb4bd554">5.1.2. <code>RARRAY_PTR</code></a></li>
-<li><a href="#org37368f9">5.1.3. Calling functions with the wrong arguments</a></li>
+<li><a href="#org5d6af74">5.1.1. The type of <code>VALUE</code></a></li>
+<li><a href="#orgaed039e">5.1.2. <code>RARRAY_PTR</code></a></li>
+<li><a href="#orgd81ac36">5.1.3. Calling functions with the wrong arguments</a></li>
 </ul>
 </li>
-<li><a href="#orgbe383b7">5.2. Performance</a></li>
-<li><a href="#org669946b">5.3. What's next?</a></li>
+<li><a href="#org7a09b41">5.2. Performance</a></li>
+<li><a href="#orgf7c7f88">5.3. What's next?</a></li>
 </ul>
 </li>
-<li><a href="#org0e91144">6. Conclusion</a></li>
+<li><a href="#orgaffb462">6. Conclusion</a></li>
 </ul>
 </div>
 </div>
@@ -98,8 +98,8 @@ Truffle based languages can support polyglot calls, how C extensions
 used to work in TruffleRuby, how they now work, and what the remaining
 differences are with MRI.
 </p>
-<div id="outline-container-org6d50c08" class="outline-2">
-<h2 id="org6d50c08"><span class="section-number-2">1</span> Interactions between Truffle languages</h2>
+<div id="outline-container-org1886d89" class="outline-2">
+<h2 id="org1886d89"><span class="section-number-2">1</span> Interactions between Truffle languages</h2>
 <div class="outline-text-2" id="text-1">
 <p>
 All Truffle languages can provide support for other languages to
@@ -127,8 +127,8 @@ when converting back from handles) to avoid the problem.
 </p>
 </div>
 </div>
-<div id="outline-container-org41e4027" class="outline-2">
-<h2 id="org41e4027"><span class="section-number-2">2</span> C extensions the old way</h2>
+<div id="outline-container-org223503f" class="outline-2">
+<h2 id="org223503f"><span class="section-number-2">2</span> C extensions the old way</h2>
 <div class="outline-text-2" id="text-2">
 <p>
 We used Truffle's polyglot features to call C functions from Ruby, and
@@ -139,8 +139,8 @@ shared library or stored on the native heap. To solve that problem we
 would patch C extensions in two ways.
 </p>
 </div>
-<div id="outline-container-org0f9987a" class="outline-3">
-<h3 id="org0f9987a"><span class="section-number-3">2.1</span> Managed memory</h3>
+<div id="outline-container-orge0e571c" class="outline-3">
+<h3 id="orge0e571c"><span class="section-number-3">2.1</span> Managed memory</h3>
 <div class="outline-text-3" id="text-2-1">
 <p>
 The first way to avoid problems with the translation of Ruby objects to
@@ -153,8 +153,8 @@ nested members of fused arrays.
 </p>
 </div>
 </div>
-<div id="outline-container-org9caf9b7" class="outline-3">
-<h3 id="org9caf9b7"><span class="section-number-3">2.2</span> Handles everywhere</h3>
+<div id="outline-container-org90ace5a" class="outline-3">
+<h3 id="org90ace5a"><span class="section-number-3">2.2</span> Handles everywhere</h3>
 <div class="outline-text-3" id="text-2-2">
 <p>
 The second way to solve these problems was to use the functions Sulong
@@ -166,8 +166,8 @@ needed to be converted to or from native memory.
 </div>
 </div>
 </div>
-<div id="outline-container-org3879382" class="outline-2">
-<h2 id="org3879382"><span class="section-number-2">3</span> Difficult issues with our old approach</h2>
+<div id="outline-container-org3b29ebc" class="outline-2">
+<h2 id="org3b29ebc"><span class="section-number-2">3</span> Difficult issues with our old approach</h2>
 <div class="outline-text-2" id="text-3">
 <p>
 So, there are a couple of issues with the old approach and resource
@@ -285,8 +285,8 @@ compatible we need a different approach.
 </p>
 </div>
 </div>
-<div id="outline-container-orgbc59892" class="outline-2">
-<h2 id="orgbc59892"><span class="section-number-2">4</span> C extensions the new way</h2>
+<div id="outline-container-orgf9ce310" class="outline-2">
+<h2 id="orgf9ce310"><span class="section-number-2">4</span> C extensions the new way</h2>
 <div class="outline-text-2" id="text-4">
 <p>
 Our previous approach was enough to get several key C extensions
@@ -298,8 +298,8 @@ both these approaches had issues. So we tried a third approach,
 wrapping every Ruby object.
 </p>
 </div>
-<div id="outline-container-org5474731" class="outline-3">
-<h3 id="org5474731"><span class="section-number-3">4.1</span> Wrapping and unwrapping</h3>
+<div id="outline-container-org879c88c" class="outline-3">
+<h3 id="org879c88c"><span class="section-number-3">4.1</span> Wrapping and unwrapping</h3>
 <div class="outline-text-3" id="text-4-1">
 <p>
 The idea is fairly simple. C extensions will never see raw Ruby
@@ -313,8 +313,8 @@ our C code to wrap and unwrap values that is as far as the changes go.
 </p>
 </div>
 </div>
-<div id="outline-container-orge4b7195" class="outline-3">
-<h3 id="orge4b7195"><span class="section-number-3">4.2</span> Tidying up wrappers</h3>
+<div id="outline-container-orgdf25e32" class="outline-3">
+<h3 id="orgdf25e32"><span class="section-number-3">4.2</span> Tidying up wrappers</h3>
 <div class="outline-text-3" id="text-4-2">
 <p>
 It was also important that these wrappers didn't cause the objects
@@ -328,8 +328,8 @@ mustn't be collected too soon.
 </p>
 </div>
 </div>
-<div id="outline-container-org039655f" class="outline-3">
-<h3 id="org039655f"><span class="section-number-3">4.3</span> Keeping objects alive in MRI</h3>
+<div id="outline-container-org1533bee" class="outline-3">
+<h3 id="org1533bee"><span class="section-number-3">4.3</span> Keeping objects alive in MRI</h3>
 <div class="outline-text-3" id="text-4-3">
 <p>
 MRI keeps objects alive in two ways when they are being used in a C
@@ -347,8 +347,8 @@ the stack which should also keep their respective objects alive.
 </p>
 </div>
 </div>
-<div id="outline-container-org3aec44b" class="outline-3">
-<h3 id="org3aec44b"><span class="section-number-3">4.4</span> Periodic marking</h3>
+<div id="outline-container-org6a20fd2" class="outline-3">
+<h3 id="org6a20fd2"><span class="section-number-3">4.4</span> Periodic marking</h3>
 <div class="outline-text-3" id="text-4-4">
 <p>
 We can solve this by keeping two lists of objects that need to be kept
@@ -364,8 +364,8 @@ attach lists of marked objects to their owners.
 </div>
 </div>
 </div>
-<div id="outline-container-org7e4bf14" class="outline-2">
-<h2 id="org7e4bf14"><span class="section-number-2">5</span> Testing the new approach and what's next?</h2>
+<div id="outline-container-org0125cd4" class="outline-2">
+<h2 id="org0125cd4"><span class="section-number-2">5</span> Testing the new approach and what's next?</h2>
 <div class="outline-text-2" id="text-5">
 <p>
 I said at the start of this article that we used to have to patch C
@@ -374,8 +374,8 @@ approach perform well or is more work required to make it fast; and
 what are our next steps?
 </p>
 </div>
-<div id="outline-container-orgb519b1b" class="outline-3">
-<h3 id="orgb519b1b"><span class="section-number-3">5.1</span> Compatibility</h3>
+<div id="outline-container-orga141c62" class="outline-3">
+<h3 id="orga141c62"><span class="section-number-3">5.1</span> Compatibility</h3>
 <div class="outline-text-3" id="text-5-1">
 <p>
 <a href="https://github.com/oracle/truffleruby/commit/1915b9a4">130 additions, and 1,402 deletions</a> is the best kind of commit to be
@@ -390,8 +390,8 @@ still some fundamental differences between us and MRI, but they are
 much smaller than they were.
 </p>
 </div>
-<div id="outline-container-org9b6b438" class="outline-4">
-<h4 id="org9b6b438"><span class="section-number-4">5.1.1</span> The type of <code>VALUE</code></h4>
+<div id="outline-container-org5d6af74" class="outline-4">
+<h4 id="org5d6af74"><span class="section-number-4">5.1.1</span> The type of <code>VALUE</code></h4>
 <div class="outline-text-4" id="text-5-1-1">
 <p>
 One is that our <code>VALUE</code> type is a <code>void *</code> in C. This means we can't
@@ -400,8 +400,8 @@ tries to do that.
 </p>
 </div>
 </div>
-<div id="outline-container-orgb4bd554" class="outline-4">
-<h4 id="orgb4bd554"><span class="section-number-4">5.1.2</span> <code>RARRAY_PTR</code></h4>
+<div id="outline-container-orgaed039e" class="outline-4">
+<h4 id="orgaed039e"><span class="section-number-4">5.1.2</span> <code>RARRAY_PTR</code></h4>
 <div class="outline-text-4" id="text-5-1-2">
 <p>
 We also can't yet translate a pointer to a Ruby array's contents to
@@ -413,8 +413,8 @@ resolve this area of incompatibility very soon.
 </p>
 </div>
 </div>
-<div id="outline-container-org37368f9" class="outline-4">
-<h4 id="org37368f9"><span class="section-number-4">5.1.3</span> Calling functions with the wrong arguments</h4>
+<div id="outline-container-orgd81ac36" class="outline-4">
+<h4 id="orgd81ac36"><span class="section-number-4">5.1.3</span> Calling functions with the wrong arguments</h4>
 <div class="outline-text-4" id="text-5-1-3">
 <p>
 There are also some small differences imposed by our use of Sulong to
@@ -430,8 +430,8 @@ behaviour of any C extensions.
 </div>
 </div>
 </div>
-<div id="outline-container-orgbe383b7" class="outline-3">
-<h3 id="orgbe383b7"><span class="section-number-3">5.2</span> Performance</h3>
+<div id="outline-container-org7a09b41" class="outline-3">
+<h3 id="org7a09b41"><span class="section-number-3">5.2</span> Performance</h3>
 <div class="outline-text-3" id="text-5-2">
 <p>
 Translating between Ruby objects and native pointers requires updating
@@ -459,8 +459,8 @@ performance in this area.
 </p>
 </div>
 </div>
-<div id="outline-container-org669946b" class="outline-3">
-<h3 id="org669946b"><span class="section-number-3">5.3</span> What's next?</h3>
+<div id="outline-container-orgf7c7f88" class="outline-3">
+<h3 id="orgf7c7f88"><span class="section-number-3">5.3</span> What's next?</h3>
 <div class="outline-text-3" id="text-5-3">
 <p>
 As I mentioned above we're still working on some changes to improve
@@ -474,14 +474,14 @@ these.
 </div>
 </div>
 </div>
-<div id="outline-container-org0e91144" class="outline-2">
-<h2 id="org0e91144"><span class="section-number-2">6</span> Conclusion</h2>
+<div id="outline-container-orgaffb462" class="outline-2">
+<h2 id="orgaffb462"><span class="section-number-2">6</span> Conclusion</h2>
 <div class="outline-text-2" id="text-6">
 <p>
-These changes will come out out as part of next GraalVM release
-candidate. If you use or maintain a C extension then now is great time
-to test it with TruffleRuby. Get in touch with us via <a href="https://twitter.com/truffleruby?lang=en">twitter</a> or
-report issues via our <a href="https://github.com/oracle/truffleruby">GitHub repo</a>
+These changes will be coming out as part of next GraalVM release
+(release candidate 12). If you use or maintain a Ruby C extension then
+now is great time to start testing it with TruffleRuby. Get in touch
+with us via <a href="https://twitter.com/truffleruby?lang=en">twitter</a> or <a href="https://gitter.im/graalvm/truffleruby">Gitter</a>, or report issues via our <a href="https://github.com/oracle/truffleruby">GitHub repo</a>
 </p>
 </div>
 </div>
