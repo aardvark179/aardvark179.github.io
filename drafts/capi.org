@@ -491,7 +491,88 @@ can create this list whenever we enter a C extension, and destroy it
 again when we finish the call. The other list is a fixed size buffer
 of every wrapper converted to a pointer. Whenever this list becomes
 full we'll run any marking functions associated with live objects and
-attach lists of marked objects to their owners.
+attach lists of marked objects to their owners. Let's see what that
+looks like with the example we've used before (I've left off the stack
+list to keep the diagrams from becoming too cluttered):
+#+BEGIN_SRC dot :file marking.svg :exports results
+digraph D {
+ subgraph cluster_before {
+  label = "Before GC";
+
+  X_1 [label="Handle table" shape=box color = red]
+  Y_1 [label="Preservation table" shape=box color = red]
+  A_1 [label="A" shape = box color = red]
+  B_1 [label="B" shape = box]
+  C_1 [label="C" shape = box]
+
+  A_1 -> B_1 [color=blue]
+  B_1 -> C_1 [color=blue]
+
+  X_1 -> B_1 [color=blue]
+  X_1 -> C_1 [color=blue]
+
+  Y_1 -> B_1 [color=red]
+  Y_1 -> C_1 [color=red]
+ }
+ subgraph cluster_mark_full {
+  label = "Preservation table full";
+
+  X_2 [label="Handle table" shape=box color = red]
+  Y_2 [label="Preservation table" shape=box color = red]
+  A_2 [label="A" shape = box color = red]
+  A_mark_2 [label="A mark" shape=box]
+  B_2 [label="B" shape = box]
+  B_mark_2 [label="B mark" shape=box]
+  C_2 [label="C" shape = box]
+
+  A_2 -> A_mark_2 [color=red]
+  B_2 -> B_mark_2 [color=red]
+
+  A_2 -> B_2 [color=blue]
+  B_2 -> C_2 [color=blue]
+
+  X_2 -> B_2 [color=blue]
+  X_2 -> C_2 [color=blue]
+
+  A_mark_2 -> B_2 [color=red]
+  B_mark_2 -> C_2 [color=red]
+ }
+ subgraph cluster_gc_1 {
+  label = "Collect A";
+
+  X_3 [label="Handle table" shape=box color = red]
+  Y_3 [label="Preservation table" shape=box color = red]
+  A_3 [label="A" shape = box color = lightgrey]
+  A_mark_3 [label="A mark" shape=box]
+  B_3 [label="B" shape = box]
+  B_mark_3 [label="B mark" shape=box]
+  C_3 [label="C" shape = box]
+
+  A_3 -> A_mark_3 [color=lightgrey]
+  B_3 -> B_mark_3 [color=red]
+
+  A_3 -> B_3 [color=lightgrey]
+  B_3 -> C_3 [color=blue]
+
+  X_3 -> B_3 [color=blue]
+  X_3 -> C_3 [color=blue]
+
+  A_mark_3 -> B_3 [color=red]
+  B_mark_3 -> C_3 [color=red]
+ }
+}
+#+END_SRC
+
+#+RESULTS:
+[[file:marking.svg]]
+
+As you can see, since the handle table now only holds weak references
+to objects, once the preservation table has become full and the
+markers have been run there are no strong references from the
+preservation table or the handle table to the actuAl objects. We no
+longer need to write special finalisers for the object we create, as
+long as we ensure the marking functions do not maintain any strong
+references to the objects.
 * Testing the new approach and what's next?
 I said at the start of this article that we used to have to patch C
 extensions, so how much has our compatibility improved; does this new
