@@ -4,10 +4,482 @@
     <title>aardvark179.github.io</title>
     <link>https://aardvark179.github.io</link>
     <description></description>
-    <pubDate>Fri, 14 Dec 2018 18:54:16 GMT</pubDate>
-    <lastBuildDate>Fri, 14 Dec 2018 18:54:16 GMT</lastBuildDate>
+    <pubDate>Mon, 04 Feb 2019 15:48:40 GMT</pubDate>
+    <lastBuildDate>Mon, 04 Feb 2019 15:48:40 GMT</lastBuildDate>
     <docs>http://www.rssboard.org/rss-specification</docs>
     <generator>Org-page static site generator (https://github.com/kelvinh/org-page)</generator>
+    <item>
+      <title>Better support for C extensions in TruffleRuby.</title>
+      <link>https://aardvark179.github.io/blog/capi.html</link>
+      <description><![CDATA[<section id="content" role="main">
+    <div id="outline-container-sec-" class="row" style="padding-top: 70px">
+        <div class="col-md-2"></div>
+            <h1>Better support for C extensions in TruffleRuby.</h1>
+            <div id="table-of-contents">
+<h2>Table of Contents</h2>
+<div id="text-table-of-contents">
+<ul>
+<li><a href="#org562a885">1. Interactions between Truffle languages</a></li>
+<li><a href="#orgf7a5212">2. C extensions the old way</a>
+<ul>
+<li><a href="#orgc239c52">2.1. Managed memory</a></li>
+<li><a href="#orgd5e4fc3">2.2. Handles everywhere</a></li>
+</ul>
+</li>
+<li><a href="#org3005066">3. Difficult issues with our old approach</a></li>
+<li><a href="#org4ddff6c">4. C extensions the new way</a>
+<ul>
+<li><a href="#org5e88149">4.1. Wrapping and unwrapping</a></li>
+<li><a href="#orge5595c0">4.2. Tidying up wrappers</a></li>
+<li><a href="#orged17412">4.3. Keeping objects alive in MRI</a></li>
+<li><a href="#org409e900">4.4. Periodic marking</a></li>
+</ul>
+</li>
+<li><a href="#orgb27ad38">5. Testing the new approach and what's next?</a>
+<ul>
+<li><a href="#org3304a46">5.1. Compatibility</a>
+<ul>
+<li><a href="#org978ed06">5.1.1. The type of <code>VALUE</code></a></li>
+<li><a href="#org5e7456e">5.1.2. <code>RARRAY_PTR</code></a></li>
+<li><a href="#org16536e3">5.1.3. Calling functions with the wrong arguments</a></li>
+</ul>
+</li>
+<li><a href="#org22fe821">5.2. Performance</a></li>
+<li><a href="#org24e877c">5.3. What's next?</a></li>
+</ul>
+</li>
+<li><a href="#org4b751db">6. Conclusion</a></li>
+</ul>
+</div>
+</div>
+<p>
+We think it is crucial that any alternative Ruby implementation aiming
+to be fully compatible with MRI runs the C extensions. TruffleRuby's
+compatibility was recently significantly improved, with much better
+support that almost completely removes the need to patch C extensions.
+</p>
+
+<p>
+We've been able to support C extensions in TruffleRuby for a long time
+now, but we've always had to patch them while building the C for them
+to work. We've just added much better support which almost completely
+removes the need to patch extensions. In this article I'll explain how
+Truffle based languages can support polyglot calls, how C extensions
+used to work in TruffleRuby, how they now work, and what the remaining
+differences are with MRI.
+</p>
+<div id="outline-container-org562a885" class="outline-2">
+<h2 id="org562a885"><span class="section-number-2">1</span> Interactions between Truffle languages</h2>
+<div class="outline-text-2" id="text-1">
+<p>
+All Truffle languages can provide support for other languages to
+access data and make calls by defining how foreign access is
+resolved. This covers things like asking if an object is executable,
+or has a size, reading and writing public accessible fields, and so
+forth. So JavaScript can easily call methods on a Ruby object, or
+access members of a Ruby array as long as we provide foreign access
+for Ruby objects.
+</p>
+
+<p>
+There is also support for lower level concepts in the foreign access
+APIs.  You can convert an object to a native representation, as well
+as checking whether that object can behave like a pointer.
+</p>
+
+<p>
+These facilities don't cover everything though, so Sulong provides a
+set of functions for converting almost any object into a native handle
+and back again. I say almost any object because boxed primitives such
+as <code>java.lang.Integer</code> are not supported, but you can always arrange
+to wrap these in an object that is supported (and unwrap them again
+when converting back from handles) to avoid the problem.
+</p>
+</div>
+</div>
+<div id="outline-container-orgf7a5212" class="outline-2">
+<h2 id="orgf7a5212"><span class="section-number-2">2</span> C extensions the old way</h2>
+<div class="outline-text-2" id="text-2">
+<p>
+We used Truffle's polyglot features to call C functions from Ruby, and
+Ruby methods from C, without touching the arguments at all. This
+allowed Ruby objects to pass easily through C code that is interpreted
+by Sulong, but fails if those objects have to be passed to a native
+shared library or stored on the native heap. To solve that problem we
+would patch C extensions in two ways.
+</p>
+</div>
+<div id="outline-container-orgc239c52" class="outline-3">
+<h3 id="orgc239c52"><span class="section-number-3">2.1</span> Managed memory</h3>
+<div class="outline-text-3" id="text-2-1">
+<p>
+The first way to avoid problems with the translation of Ruby objects to
+native pointers is to avoid doing as much as possible. By default we'd
+replace every array of <code>VALUE</code> objects (which would be stored on the
+native heap) with a managed object that could store the object without
+conversion. We could also allocate managed structs instead of native
+one, but this became complicated with complex structures which had
+nested members of fused arrays.
+</p>
+</div>
+</div>
+<div id="outline-container-orgd5e4fc3" class="outline-3">
+<h3 id="orgd5e4fc3"><span class="section-number-3">2.2</span> Handles everywhere</h3>
+<div class="outline-text-3" id="text-2-2">
+<p>
+The second way to solve these problems was to use the functions Sulong
+provided to convert between managed objects and native handles. These
+functions were hard to use without introducing memory leaks however,
+and did require that we patched every point at which a Ruby object
+needed to be converted to or from native memory.
+</p>
+</div>
+</div>
+</div>
+<div id="outline-container-org3005066" class="outline-2">
+<h2 id="org3005066"><span class="section-number-2">3</span> Difficult issues with our old approach</h2>
+<div class="outline-text-2" id="text-3">
+<p>
+So, there are a couple of issues with the old approach and resource
+leaks. Let's take a look at the behaviour we would like, the problems
+we could see with the old approach, and what we could do to fix
+those. We'll start by considering a simple case of three objects A, B,
+and C. A will be a GC root (i.e. it's either some sort of global
+object or a variable which the garbage collector knows cannot be
+removed), and B and C are Ruby objects. A will have an instance
+variable of B, and B will have one of C. So A has a hard reference to
+B and B has a hard reference to C like this.
+</p>
+
+<div class="figure">
+<p><object type="image/svg+xml" data="file:///home/duncan/work/aardvark179.github.io/diagram.svg" class="org-svg">
+Sorry, your browser does not support SVG.</object>
+</p>
+</div>
+
+<p>
+We'll use red arrows to indicate hard references from now on, and red
+boxes to indicate GC roots. The good thing here is that if A stops
+being a root, or a hard reference is removed then some or all of the
+objects can be collected.
+</p>
+
+
+<div class="figure">
+<p><object type="image/svg+xml" data="file:///home/duncan/work/aardvark179.github.io/diagram_gc.svg" class="org-svg">
+Sorry, your browser does not support SVG.</object>
+</p>
+</div>
+
+<p>
+Now, what happens when A, B, and C are C structs which have been
+wrapped in Ruby objects? Well, now our hard references are just
+<code>VALUEs</code> in the structs, and for the GC to know those are alive each
+object must mark those it has references to. We'll use purple to mark
+marked links.
+</p>
+
+
+<div class="figure">
+<p><object type="image/svg+xml" data="file:///home/duncan/work/aardvark179.github.io/diagram2.svg" class="org-svg">
+Sorry, your browser does not support SVG.</object>
+</p>
+</div>
+
+<p>
+So in this situation if A stops marking B, or B stops marking C, or A
+ceases to be a GC root then those objects can be collected, just as
+they were above.
+</p>
+
+<p>
+Now what happens in TruffleRuby when we use handles?
+</p>
+
+
+<div class="figure">
+<p><object type="image/svg+xml" data="file:///home/duncan/work/aardvark179.github.io/diagram3.svg" class="org-svg">
+Sorry, your browser does not support SVG.</object>
+</p>
+</div>
+
+<p>
+Now we have a problem. The references from A to B, and B to C are weak
+(they are simple handle numbers) so the handle table has to associate
+those with the objects they represent by keeping a strong
+reference. For B or C to be garbage collected we would need to remove
+the handle pointing to them. Likewise if A ceases to be a root
+something needs to happen for B and C to be collected.
+</p>
+
+<p>
+We might be able to do that with a finaliser for A which in turn
+releases the handle to B, whose finaliser can release the handle to C,
+but the situation may not always be so simple. Consider the following
+structure of objects.
+</p>
+
+
+<div class="figure">
+<p><object type="image/svg+xml" data="file:///home/duncan/work/aardvark179.github.io/diagram4.svg" class="org-svg">
+Sorry, your browser does not support SVG.</object>
+</p>
+</div>
+
+<p>
+This is a common sort of structure to find in tools like XML
+processors such as Nokogiri. Each node has a reference to the parent
+document, and to its own children. If we break the hard reference from
+the GC root object to the document then it and all of its nodes can be
+collected. The same is true if the nodes hold <code>VALUEs</code> and mark them,
+but what happens if we use handles?
+</p>
+
+
+<div class="figure">
+<p><object type="image/svg+xml" data="file:///home/duncan/work/aardvark179.github.io/diagram5.svg" class="org-svg">
+Sorry, your browser does not support SVG.</object>
+</p>
+</div>
+
+<p>
+Well, our diagram has certainly got messier! But it's also hard to
+know how we should free those objects nicely. Release the handle that
+Object held to Document doesn't help, because other handles exist
+pointing to it from the nodes, so the whole cluster remains
+uncollected. There doesn't seem to be a nice obvious order in which we
+could do it. We could solve almost any situation like this by
+introducing weak handles, but that requires patching each C extension,
+and carefully analysing how to break these cycles. To really be
+compatible we need a different approach.
+</p>
+</div>
+</div>
+<div id="outline-container-org4ddff6c" class="outline-2">
+<h2 id="org4ddff6c"><span class="section-number-2">4</span> C extensions the new way</h2>
+<div class="outline-text-2" id="text-4">
+<p>
+Our previous approach was enough to get several key C extensions
+working, but sometimes they required large patches, and avoiding
+resource leaks was tricky. We prototyped several approaches, either
+making as many parts as possible managed objects to avoid conversion,
+or allowing all Ruby objects to be converted to native pointers, but
+both these approaches had issues. So we tried a third approach,
+wrapping every Ruby object.
+</p>
+</div>
+<div id="outline-container-org5e88149" class="outline-3">
+<h3 id="org5e88149"><span class="section-number-3">4.1</span> Wrapping and unwrapping</h3>
+<div class="outline-text-3" id="text-4-1">
+<p>
+The idea is fairly simple. C extensions will never see raw Ruby
+objects, they will only ever see wrappers that know how to convert
+themselves to native pointers, and at every point where a Ruby object
+needs to be extracted from a wrapper we know there should only ever be
+a wrapper or a native pointer. This makes it easy to convert back from
+a native pointer to a wrapper. Best of all C extensions don't have to
+know this is happening, so although it required a lot of changes to
+our C code to wrap and unwrap values that is as far as the changes go.
+</p>
+</div>
+</div>
+<div id="outline-container-orge5595c0" class="outline-3">
+<h3 id="orge5595c0"><span class="section-number-3">4.2</span> Tidying up wrappers</h3>
+<div class="outline-text-3" id="text-4-2">
+<p>
+It was also important that these wrappers didn't cause the objects
+they wrapped to live longer than expected. This was a real problem
+with the handle conversion we used to do, and we didn't want to make
+it worse. Wrappers obviously need to keep a strong reference to the
+object they wrap, and objects should also keep a strong reference to
+their wrapper, but converting an object to a native pointer should not
+stop it from getting garbage collected at some point, but equally it
+mustn't be collected too soon.
+</p>
+</div>
+</div>
+<div id="outline-container-orged17412" class="outline-3">
+<h3 id="orged17412"><span class="section-number-3">4.3</span> Keeping objects alive in MRI</h3>
+<div class="outline-text-3" id="text-4-3">
+<p>
+MRI keeps objects alive in two ways when they are being used in a C
+extension. Any object still on the stack will be seen by the GC and
+kept alive, but that isn't enough to preserve values which may have
+been assigned to a field in a structure. MRI allows these to be kept
+alive by associating the structure with a Ruby object, and allowing
+that object to mark other objects it has references to. So, when the
+garbage collector traverses all the objects in your Ruby heap it calls
+these custom mark functions and the objects will be marked as live as
+long as the owners are. There's just one problem, we don't have a GC
+which can call custom mark functions, we have to work with any GC on
+the JVM. We also can't change the GC to look for native pointers on
+the stack which should also keep their respective objects alive.
+</p>
+</div>
+</div>
+<div id="outline-container-org409e900" class="outline-3">
+<h3 id="org409e900"><span class="section-number-3">4.4</span> Periodic marking</h3>
+<div class="outline-text-3" id="text-4-4">
+<p>
+We can solve this by keeping two lists of objects that need to be kept
+alive. Then each time we convert a wrapper to a native pointer we will
+add the wrapper to the lists, and it will in turn keep its object
+alive. One list is for those objects with pointers on the stack. We
+can create this list whenever we enter a C extension, and destroy it
+again when we finish the call. The other list is a fixed size buffer
+of every wrapper converted to a pointer. Whenever this list becomes
+full we'll run any marking functions associated with live objects and
+attach lists of marked objects to their owners. Let's see what that
+looks like with the example we've used before (I've left off the stack
+list to keep the diagrams from becoming too cluttered):
+</p>
+
+<div class="figure">
+<p><object type="image/svg+xml" data="file:///home/duncan/work/aardvark179.github.io/marking.svg" class="org-svg">
+Sorry, your browser does not support SVG.</object>
+</p>
+</div>
+
+<p>
+As you can see, since the handle table now only holds weak references
+to objects, once the preservation table has become full and the
+markers have been run there are no strong references from the
+preservation table or the handle table to the actual objects. We no
+longer need to write special finalisers for the object we create, as
+long as we ensure the marking functions do not maintain any strong
+references to the objects.
+</p>
+</div>
+</div>
+</div>
+<div id="outline-container-orgb27ad38" class="outline-2">
+<h2 id="orgb27ad38"><span class="section-number-2">5</span> Testing the new approach and what's next?</h2>
+<div class="outline-text-2" id="text-5">
+<p>
+I said at the start of this article that we used to have to patch C
+extensions, so how much has our compatibility improved; does this new
+approach perform well or is more work required to make it fast; and
+what are our next steps?
+</p>
+</div>
+<div id="outline-container-org3304a46" class="outline-3">
+<h3 id="org3304a46"><span class="section-number-3">5.1</span> Compatibility</h3>
+<div class="outline-text-3" id="text-5-1">
+<p>
+<a href="https://github.com/oracle/truffleruby/commit/1915b9a4">130 additions, and 1,402 deletions</a> is the best kind of commit to be
+able to merge. This new approach has allowed us to remove almost
+all our patches for C extensions, even for complex ones such as zlib,
+OpenSSL, or pg.
+</p>
+
+<p>
+Notice we've only removed <i>almost</i> all patches. There are however
+still some fundamental differences between us and MRI, but they are
+much smaller than they were.
+</p>
+</div>
+<div id="outline-container-org978ed06" class="outline-4">
+<h4 id="org978ed06"><span class="section-number-4">5.1.1</span> The type of <code>VALUE</code></h4>
+<div class="outline-text-4" id="text-5-1-1">
+<p>
+One is that our <code>VALUE</code> type is a <code>void *</code> in C. This means we can't
+do a switch on a <code>VALUE</code>, so we do still need to patch anything that
+tries to do that.
+</p>
+</div>
+</div>
+<div id="outline-container-org5e7456e" class="outline-4">
+<h4 id="org5e7456e"><span class="section-number-4">5.1.2</span> <code>RARRAY_PTR</code></h4>
+<div class="outline-text-4" id="text-5-1-2">
+<p>
+We also can't yet translate a pointer to a Ruby array's contents to
+native. This requires storing the contents in native memory so that
+they can be read and altered from C, but ensuring that the view of the
+array from Ruby remains consistent with any changes made via a C
+extension. The work to support this is in progress and we expect to
+resolve this area of incompatibility very soon.
+</p>
+</div>
+</div>
+<div id="outline-container-org16536e3" class="outline-4">
+<h4 id="org16536e3"><span class="section-number-4">5.1.3</span> Calling functions with the wrong arguments</h4>
+<div class="outline-text-4" id="text-5-1-3">
+<p>
+There are also some small differences imposed by our use of Sulong to
+interpret C extensions. One is function declarations may need to be
+changed. For example a function declared as taking two arguments must
+be passed two arguments, even if the second one is never used, and
+<code>int</code> and pointer types may not be as interchangeable as they can be
+in native C. We also have trouble with varargs functions in managed
+code being called from native libraries, but none of these differences
+causes widespread problems and most can be patched without changing the
+behaviour of any C extensions.
+</p>
+</div>
+</div>
+</div>
+<div id="outline-container-org22fe821" class="outline-3">
+<h3 id="org22fe821"><span class="section-number-3">5.2</span> Performance</h3>
+<div class="outline-text-3" id="text-5-2">
+<p>
+Translating between Ruby objects and native pointers requires updating
+a global hash table, which is relatively expensive. We reduce that
+cost by tagging the pointers for common types, so true, false, nil,
+and so forth always convert to the same native value and never need to
+touch the hash table. Likewise fixnums can be tagged to cover most of
+their range, and we can probably use a similar technique for floating
+point numbers.
+</p>
+
+<p>
+We are also doing work to reduce the costs of our GC marking
+technique. We can make an assumption that GC marking functions are
+not used and avoid those costs as long as we can safely recover as
+soon as markers are introduced, and we can reduce the cost of
+preserving objects on the stack in many situations.
+</p>
+
+<p>
+Having applied some of these techniques we have benchmarked repeated
+calls to C extensions being up to 3 times faster than MRI 2.4 in some
+cases, though not yet for all our tests. We'll continue to work on
+performance in this area.
+</p>
+</div>
+</div>
+<div id="outline-container-org24e877c" class="outline-3">
+<h3 id="org24e877c"><span class="section-number-3">5.3</span> What's next?</h3>
+<div class="outline-text-3" id="text-5-3">
+<p>
+As I mentioned above we're still working on some changes to improve
+compatibility even more, and we'll continue to benchmark and improve
+performance. We expect any remaining problems to be related to
+specific functions in the Ruby C APIs rather than being more
+fundamental compatibility issues, and we'll be expanding our testing
+of gems considerably in the near future to help find and resolve
+these.
+</p>
+</div>
+</div>
+</div>
+<div id="outline-container-org4b751db" class="outline-2">
+<h2 id="org4b751db"><span class="section-number-2">6</span> Conclusion</h2>
+<div class="outline-text-2" id="text-6">
+<p>
+These changes part of our new GraalVM release (release candidate
+12). If you use or maintain a Ruby C extension then now is great time
+to start testing it with TruffleRuby. Get in touch with us via <a href="https://twitter.com/truffleruby?lang=en">twitter</a>
+or <a href="https://gitter.im/graalvm/truffleruby">Gitter</a>, or report issues via our <a href="https://github.com/oracle/truffleruby">GitHub repo</a>
+</p>
+</div>
+</div>
+
+    </div>
+</section>
+]]></description>
+      <pubDate>2019-02-04</pubDate>
+      <guid>https://aardvark179.github.io/blog/capi.html</guid>
+    </item>
     <item>
       <title>Lightweight fibres for TruffleRuby.</title>
       <link>https://aardvark179.github.io/blog/fibers.html</link>
@@ -19,39 +491,39 @@
 <h2>Table of Contents</h2>
 <div id="text-table-of-contents">
 <ul>
-<li><a href="#orgec9a58a">1. Disclaimer</a></li>
-<li><a href="#org32d47dd">2. Lightweight threads, continuations, and Project Loom.</a>
+<li><a href="#orgef1229c">1. Disclaimer</a></li>
+<li><a href="#orge13e4b0">2. Lightweight threads, continuations, and Project Loom.</a>
 <ul>
-<li><a href="#org884ea0f">2.1. Lightweight user mode threads</a></li>
-<li><a href="#org1e53811">2.2. Continuations</a></li>
-<li><a href="#org2c14945">2.3. What makes these features more light weight than <code>java.lang.Thread</code>?</a></li>
+<li><a href="#orgbd69f7d">2.1. Lightweight user mode threads</a></li>
+<li><a href="#orgcf1fa7b">2.2. Continuations</a></li>
+<li><a href="#org9ad9b94">2.3. What makes these features more light weight than <code>java.lang.Thread</code>?</a></li>
 </ul>
 </li>
-<li><a href="#org4b2d5b2">3. Fibres and continuations in Ruby</a>
+<li><a href="#orgd49a654">3. Fibres and continuations in Ruby</a>
 <ul>
-<li><a href="#orgff843fc">3.1. Fibres</a></li>
-<li><a href="#orga248bc2">3.2. Continuations</a></li>
+<li><a href="#org8408e6a">3.1. Fibres</a></li>
+<li><a href="#orgdffc626">3.2. Continuations</a></li>
 </ul>
 </li>
-<li><a href="#org4d9c9d8">4. The differences between these two models</a></li>
-<li><a href="#org115439b">5. Implementing Ruby's model using Loom's</a>
+<li><a href="#org2115eb0">4. The differences between these two models</a></li>
+<li><a href="#org4c0ab73">5. Implementing Ruby's model using Loom's</a>
 <ul>
-<li><a href="#org38dda0c">5.1. Implementing Ruby fibres</a>
+<li><a href="#org02127b5">5.1. Implementing Ruby fibres</a>
 <ul>
-<li><a href="#org10895f7">5.1.1. With Loom's Fibres</a></li>
-<li><a href="#org59b1a7e">5.1.2. With Loom's Continuations</a></li>
+<li><a href="#orgd676819">5.1.1. With Loom's Fibres</a></li>
+<li><a href="#orgb1ab4aa">5.1.2. With Loom's Continuations</a></li>
 </ul>
 </li>
-<li><a href="#org490ba41">5.2. Implementing <code>callcc</code></a></li>
+<li><a href="#orgeae422f">5.2. Implementing <code>callcc</code></a></li>
 </ul>
 </li>
-<li><a href="#org7e652d7">6. The results</a>
+<li><a href="#org6e189d6">6. The results</a>
 <ul>
-<li><a href="#org1152fff">6.1. How many fibres can we support?</a></li>
-<li><a href="#org78889b5">6.2. Scheduling between fibres</a></li>
+<li><a href="#orgff01ad2">6.1. How many fibres can we support?</a></li>
+<li><a href="#orgb92b0df">6.2. Scheduling between fibres</a></li>
 </ul>
 </li>
-<li><a href="#orga712f95">7. Conclusion</a></li>
+<li><a href="#orgd090810">7. Conclusion</a></li>
 </ul>
 </div>
 </div>
@@ -65,8 +537,8 @@ but that's starting to change with <a href="http://openjdk.java.net/projects/loo
 what it gives, and how we can use that to implement fibres that can
 scale beyond even MRI's.
 </p>
-<div id="outline-container-orgec9a58a" class="outline-2">
-<h2 id="orgec9a58a"><span class="section-number-2">1</span> Disclaimer</h2>
+<div id="outline-container-orgef1229c" class="outline-2">
+<h2 id="orgef1229c"><span class="section-number-2">1</span> Disclaimer</h2>
 <div class="outline-text-2" id="text-1">
 <p>
 Everything I"m talking about here is based on early prototypes. The
@@ -78,8 +550,8 @@ prototype we'll talk about here for TruffleRuby.
 </p>
 </div>
 </div>
-<div id="outline-container-org32d47dd" class="outline-2">
-<h2 id="org32d47dd"><span class="section-number-2">2</span> Lightweight threads, continuations, and Project Loom.</h2>
+<div id="outline-container-orge13e4b0" class="outline-2">
+<h2 id="orge13e4b0"><span class="section-number-2">2</span> Lightweight threads, continuations, and Project Loom.</h2>
 <div class="outline-text-2" id="text-2">
 <p>
 Project Loom is an OpenJDK project with the goal
@@ -97,8 +569,8 @@ That may sound complex, but let's look at it bit by bit and see what
 it gives us in Java, and how we can use that in TruffleRuby.
 </p>
 </div>
-<div id="outline-container-org884ea0f" class="outline-3">
-<h3 id="org884ea0f"><span class="section-number-3">2.1</span> Lightweight user mode threads</h3>
+<div id="outline-container-orgbd69f7d" class="outline-3">
+<h3 id="orgbd69f7d"><span class="section-number-3">2.1</span> Lightweight user mode threads</h3>
 <div class="outline-text-3" id="text-2-1">
 <p>
 These are currently called <code>java.lang.Fiber</code> in the project loom
@@ -114,8 +586,8 @@ library will do that for you.
 </p>
 </div>
 </div>
-<div id="outline-container-org1e53811" class="outline-3">
-<h3 id="org1e53811"><span class="section-number-3">2.2</span> Continuations</h3>
+<div id="outline-container-orgcf1fa7b" class="outline-3">
+<h3 id="orgcf1fa7b"><span class="section-number-3">2.2</span> Continuations</h3>
 <div class="outline-text-3" id="text-2-2">
 <p>
 Continuations are a lower level concept upon which those lightweight
@@ -126,8 +598,8 @@ local variables, and so forth.
 </p>
 </div>
 </div>
-<div id="outline-container-org2c14945" class="outline-3">
-<h3 id="org2c14945"><span class="section-number-3">2.3</span> What makes these features more light weight than <code>java.lang.Thread</code>?</h3>
+<div id="outline-container-org9ad9b94" class="outline-3">
+<h3 id="org9ad9b94"><span class="section-number-3">2.3</span> What makes these features more light weight than <code>java.lang.Thread</code>?</h3>
 <div class="outline-text-3" id="text-2-3">
 <p>
 A normal <code>java.lang.Thread</code> in Hotspot is a normal operating system
@@ -145,16 +617,16 @@ often know precisely what to run next.
 </div>
 </div>
 </div>
-<div id="outline-container-org4b2d5b2" class="outline-2">
-<h2 id="org4b2d5b2"><span class="section-number-2">3</span> Fibres and continuations in Ruby</h2>
+<div id="outline-container-orgd49a654" class="outline-2">
+<h2 id="orgd49a654"><span class="section-number-2">3</span> Fibres and continuations in Ruby</h2>
 <div class="outline-text-2" id="text-3">
 <p>
 Ruby has its own model of fibres and continuations, and they aren't
 quite the same as Loom's
 </p>
 </div>
-<div id="outline-container-orgff843fc" class="outline-3">
-<h3 id="orgff843fc"><span class="section-number-3">3.1</span> Fibres</h3>
+<div id="outline-container-org8408e6a" class="outline-3">
+<h3 id="org8408e6a"><span class="section-number-3">3.1</span> Fibres</h3>
 <div class="outline-text-3" id="text-3-1">
 <p>
 Ruby has the <code>Fiber</code> class. You create a <code>Fiber</code> with a block like this
@@ -179,8 +651,8 @@ which transferred control to them.
 </p>
 </div>
 </div>
-<div id="outline-container-orga248bc2" class="outline-3">
-<h3 id="orga248bc2"><span class="section-number-3">3.2</span> Continuations</h3>
+<div id="outline-container-orgdffc626" class="outline-3">
+<h3 id="orgdffc626"><span class="section-number-3">3.2</span> Continuations</h3>
 <div class="outline-text-3" id="text-3-2">
 <p>
 Continuations in Ruby are created using the <code>Kernel#callcc</code>
@@ -235,8 +707,8 @@ support them in TruffleRuby.
 </div>
 </div>
 </div>
-<div id="outline-container-org4d9c9d8" class="outline-2">
-<h2 id="org4d9c9d8"><span class="section-number-2">4</span> The differences between these two models</h2>
+<div id="outline-container-org2115eb0" class="outline-2">
+<h2 id="org2115eb0"><span class="section-number-2">4</span> The differences between these two models</h2>
 <div class="outline-text-2" id="text-4">
 <p>
 As you can see these models differ in a couple of important ways.
@@ -256,16 +728,16 @@ advancing the execution state.
 </p>
 </div>
 </div>
-<div id="outline-container-org115439b" class="outline-2">
-<h2 id="org115439b"><span class="section-number-2">5</span> Implementing Ruby's model using Loom's</h2>
+<div id="outline-container-org4c0ab73" class="outline-2">
+<h2 id="org4c0ab73"><span class="section-number-2">5</span> Implementing Ruby's model using Loom's</h2>
 <div class="outline-text-2" id="text-5">
 <p>
 So given the quite different nature of these two models can we
 implement Ruby's fibres and continuations using what Loom provides?
 </p>
 </div>
-<div id="outline-container-org38dda0c" class="outline-3">
-<h3 id="org38dda0c"><span class="section-number-3">5.1</span> Implementing Ruby fibres</h3>
+<div id="outline-container-org02127b5" class="outline-3">
+<h3 id="org02127b5"><span class="section-number-3">5.1</span> Implementing Ruby fibres</h3>
 <div class="outline-text-3" id="text-5-1">
 <p>
 Most of the code in TruffleRuby concerned with fibres is in a small
@@ -274,8 +746,8 @@ fibres and how control is passed between them. This makes it quite
 easy for us to prototype new implementations.
 </p>
 </div>
-<div id="outline-container-org10895f7" class="outline-4">
-<h4 id="org10895f7"><span class="section-number-4">5.1.1</span> With Loom's Fibres</h4>
+<div id="outline-container-orgd676819" class="outline-4">
+<h4 id="orgd676819"><span class="section-number-4">5.1.1</span> With Loom's Fibres</h4>
 <div class="outline-text-4" id="text-5-1-1">
 <p>
 Could we simply replace the use of threads in <code>FiberManager</code> with
@@ -287,8 +759,8 @@ likely to change, so we'll leave that attempt till later.
 </p>
 </div>
 </div>
-<div id="outline-container-org59b1a7e" class="outline-4">
-<h4 id="org59b1a7e"><span class="section-number-4">5.1.2</span> With Loom's Continuations</h4>
+<div id="outline-container-orgb1ab4aa" class="outline-4">
+<h4 id="orgb1ab4aa"><span class="section-number-4">5.1.2</span> With Loom's Continuations</h4>
 <div class="outline-text-4" id="text-5-1-2">
 <p>
 Loom's continuations seem like a much better fit. The <code>FiberManager</code>
@@ -298,7 +770,7 @@ process roughly as follows:
 </p>
 </div>
 <ol class="org-ol">
-<li><a id="org29c3ad9"></a>Creating a <code>Fiber</code><br />
+<li><a id="orgaea653b"></a>Creating a <code>Fiber</code><br />
 <div class="outline-text-5" id="text-5-1-2-1">
 <p>
 This should create a <code>java.lang.Continuation</code> which will do the following:
@@ -315,7 +787,7 @@ The fibre won't be run immediately, that can happen when
 </p>
 </div>
 </li>
-<li><a id="org6b91998"></a>Transferring control from the thread into a <code>Fiber</code><br />
+<li><a id="orge6c65d6"></a>Transferring control from the thread into a <code>Fiber</code><br />
 <div class="outline-text-5" id="text-5-1-2-2">
 <p>
 The <code>FiberManager</code> needs to set any arguments to the fibre, and then
@@ -324,7 +796,7 @@ run the continuation representing it. When control returns back to the
 </p>
 </div>
 </li>
-<li><a id="orgd24e3ca"></a>Transferring control from one <code>FIber</code> to another.<br />
+<li><a id="org83761ea"></a>Transferring control from one <code>FIber</code> to another.<br />
 <div class="outline-text-5" id="text-5-1-2-3">
 <p>
 The running fibre should set the next fibre to be run on the
@@ -335,7 +807,7 @@ fibre on the <code>FiberManager</code>, and get any arguments.
 </p>
 </div>
 </li>
-<li><a id="org29ef301"></a>Transferring control from a <code>Fiber</code> to the thread.<br />
+<li><a id="orgb5779f8"></a>Transferring control from a <code>Fiber</code> to the thread.<br />
 <div class="outline-text-5" id="text-5-1-2-4">
 <p>
 This is much like the above case, except the <code>FiberManager</code> will not
@@ -347,8 +819,8 @@ its original caller.
 </ol>
 </div>
 </div>
-<div id="outline-container-org490ba41" class="outline-3">
-<h3 id="org490ba41"><span class="section-number-3">5.2</span> Implementing <code>callcc</code></h3>
+<div id="outline-container-orgeae422f" class="outline-3">
+<h3 id="orgeae422f"><span class="section-number-3">5.2</span> Implementing <code>callcc</code></h3>
 <div class="outline-text-3" id="text-5-2">
 <p>
 <code>callcc</code> is harder to map to Loom's fibres or continuations, at least
@@ -380,8 +852,8 @@ continuation.</li>
 </div>
 </div>
 </div>
-<div id="outline-container-org7e652d7" class="outline-2">
-<h2 id="org7e652d7"><span class="section-number-2">6</span> The results</h2>
+<div id="outline-container-org6e189d6" class="outline-2">
+<h2 id="org6e189d6"><span class="section-number-2">6</span> The results</h2>
 <div class="outline-text-2" id="text-6">
 <p>
 So, having implemented a prototype for TruffleRuby the question is,
@@ -390,8 +862,8 @@ limited as the Loom prototype has some limitations, but it's enough to
 test a few things.
 </p>
 </div>
-<div id="outline-container-org1152fff" class="outline-3">
-<h3 id="org1152fff"><span class="section-number-3">6.1</span> How many fibres can we support?</h3>
+<div id="outline-container-orgff01ad2" class="outline-3">
+<h3 id="orgff01ad2"><span class="section-number-3">6.1</span> How many fibres can we support?</h3>
 <div class="outline-text-3" id="text-6-1">
 <p>
 It's very easy to support a large number of fibres if they are simply
@@ -502,8 +974,8 @@ another 20 times to collect timings.
 </table>
 </div>
 </div>
-<div id="outline-container-org78889b5" class="outline-3">
-<h3 id="org78889b5"><span class="section-number-3">6.2</span> Scheduling between fibres</h3>
+<div id="outline-container-orgb92b0df" class="outline-3">
+<h3 id="orgb92b0df"><span class="section-number-3">6.2</span> Scheduling between fibres</h3>
 <div class="outline-text-3" id="text-6-2">
 <p>
 Another thing to test is how fast it is to transfer control from one
@@ -595,8 +1067,8 @@ fibres created (at least within the range I could test).
 </div>
 </div>
 </div>
-<div id="outline-container-orga712f95" class="outline-2">
-<h2 id="orga712f95"><span class="section-number-2">7</span> Conclusion</h2>
+<div id="outline-container-orgd090810" class="outline-2">
+<h2 id="orgd090810"><span class="section-number-2">7</span> Conclusion</h2>
 <div class="outline-text-2" id="text-7">
 <p>
 Project Loom allows TruffleRuby to support a large number of fibres in
@@ -621,8 +1093,8 @@ concurrency models.
     <div id="outline-container-sec-" class="row" style="padding-top: 70px">
         <div class="col-md-2"></div>
             <h1>Making special variables less special in TruffleRuby</h1>
-            <div id="outline-container-orgcf66800" class="outline-2">
-<h2 id="orgcf66800"><span class="section-number-2">1</span> Making special variables less special in TruffleRuby</h2>
+            <div id="outline-container-orgfc5003b" class="outline-2">
+<h2 id="orgfc5003b"><span class="section-number-2">1</span> Making special variables less special in TruffleRuby</h2>
 <div class="outline-text-2" id="text-1">
 <p>
 Ruby has quite a large set of <a href="http://ruby-doc.org/docs/ruby-doc-bundle/Manual/man-1.4/variable.html#variables">pre-defined global variables</a> which are
@@ -645,8 +1117,8 @@ actually implementing Ruby itself, even in implementations that try to
 write as much of their standard library in Ruby as they can.
 </p>
 </div>
-<div id="outline-container-orgdd21f0f" class="outline-3">
-<h3 id="orgdd21f0f"><span class="section-number-3">1.1</span> Hooked variables</h3>
+<div id="outline-container-org8b70bb3" class="outline-3">
+<h3 id="org8b70bb3"><span class="section-number-3">1.1</span> Hooked variables</h3>
 <div class="outline-text-3" id="text-1-1">
 <p>
 The most important thing we're going to need is a way to define
@@ -689,8 +1161,8 @@ so we need to be able to provide a procedure for that.
 </p>
 </div>
 </div>
-<div id="outline-container-org910982a" class="outline-3">
-<h3 id="org910982a"><span class="section-number-3">1.2</span> Trivial example</h3>
+<div id="outline-container-org57e431c" class="outline-3">
+<h3 id="org57e431c"><span class="section-number-3">1.2</span> Trivial example</h3>
 <div class="outline-text-3" id="text-1-2">
 <p>
 Let's see this in action by defining our own hooked variable.
@@ -712,8 +1184,8 @@ let's see if we can define some of the simple special variables.
 </p>
 </div>
 </div>
-<div id="outline-container-org3640b25" class="outline-3">
-<h3 id="org3640b25"><span class="section-number-3">1.3</span> Variables related to ARGF</h3>
+<div id="outline-container-orgfe6beb3" class="outline-3">
+<h3 id="orgfe6beb3"><span class="section-number-3">1.3</span> Variables related to ARGF</h3>
 <div class="outline-text-3" id="text-1-3">
 <p>
 Several special variables are connected to <code>ARGF</code>, they link to
@@ -753,8 +1225,8 @@ instance variable on <code>ARGF</code> like this:
 </div>
 </div>
 
-<div id="outline-container-orgd927a80" class="outline-3">
-<h3 id="orgd927a80"><span class="section-number-3">1.4</span> Other simple cases</h3>
+<div id="outline-container-org6b84598" class="outline-3">
+<h3 id="org6b84598"><span class="section-number-3">1.4</span> Other simple cases</h3>
 <div class="outline-text-3" id="text-1-4">
 <p>
 Quite a few variables allow writes to them, but include some extra
@@ -783,8 +1255,8 @@ they can all be done as nice simple Ruby.
 </p>
 </div>
 </div>
-<div id="outline-container-orgb57bdee" class="outline-3">
-<h3 id="orgb57bdee"><span class="section-number-3">1.5</span> But will it optimise?</h3>
+<div id="outline-container-org28a2c66" class="outline-3">
+<h3 id="org28a2c66"><span class="section-number-3">1.5</span> But will it optimise?</h3>
 <div class="outline-text-3" id="text-1-5">
 <p>
 All the variables I've mentioned so far have a few things in
@@ -795,8 +1267,8 @@ much more heavily and are more complex to implement, so let's talk
 about what will optimise now.
 </p>
 </div>
-<div id="outline-container-orgde79265" class="outline-4">
-<h4 id="orgde79265"><span class="section-number-4">1.5.1</span> A normal global</h4>
+<div id="outline-container-orgac136d0" class="outline-4">
+<h4 id="orgac136d0"><span class="section-number-4">1.5.1</span> A normal global</h4>
 <div class="outline-text-4" id="text-1-5-1">
 <p>
 What happens when we run a simple statement like <code>$foo</code> in
@@ -810,8 +1282,8 @@ value from the storage. That should be retty fast, right?
 </p>
 </div>
 </div>
-<div id="outline-container-org222ea9b" class="outline-4">
-<h4 id="org222ea9b"><span class="section-number-4">1.5.2</span> Optimising for constant values</h4>
+<div id="outline-container-org28cddc9" class="outline-4">
+<h4 id="org28cddc9"><span class="section-number-4">1.5.2</span> Optimising for constant values</h4>
 <div class="outline-text-4" id="text-1-5-2">
 <p>
 Most global variables won't change their value, and we'd like be able
@@ -826,8 +1298,8 @@ the compiled code. So, how do we use this for global variables?
 </p>
 </div>
 </div>
-<div id="outline-container-org7517b3f" class="outline-4">
-<h4 id="org7517b3f"><span class="section-number-4">1.5.3</span> Specialising</h4>
+<div id="outline-container-org43aab3a" class="outline-4">
+<h4 id="org43aab3a"><span class="section-number-4">1.5.3</span> Specialising</h4>
 <div class="outline-text-4" id="text-1-5-3">
 <p>
 <code>ReadGlobalVariableNode</code> is slightly more complex than I let on. It
@@ -856,8 +1328,8 @@ and we'll fall back to getting the value from storage every time.
 </p>
 </div>
 </div>
-<div id="outline-container-org2bb10e7" class="outline-4">
-<h4 id="org2bb10e7"><span class="section-number-4">1.5.4</span> But what about those hooked variables we just defined?</h4>
+<div id="outline-container-org2b08509" class="outline-4">
+<h4 id="org2b08509"><span class="section-number-4">1.5.4</span> But what about those hooked variables we just defined?</h4>
 <div class="outline-text-4" id="text-1-5-4">
 <p>
 Once again <code>ReadGlobalVariableNode</code> is slightly more complex
@@ -894,8 +1366,8 @@ the JIT can optimise away all the apparent extra work.
 </p>
 </div>
 </div>
-<div id="outline-container-org2ce3567" class="outline-4">
-<h4 id="org2ce3567"><span class="section-number-4">1.5.5</span> Not so constant</h4>
+<div id="outline-container-org1464d4c" class="outline-4">
+<h4 id="org1464d4c"><span class="section-number-4">1.5.5</span> Not so constant</h4>
 <div class="outline-text-4" id="text-1-5-5">
 <p>
 All that would be great if we only had that single lambda that did
@@ -921,8 +1393,8 @@ at each of these call sites things should still work nicely.
 </div>
 </div>
 </div>
-<div id="outline-container-org31521e6" class="outline-3">
-<h3 id="org31521e6"><span class="section-number-3">1.6</span> There's special, and then there's special</h3>
+<div id="outline-container-org2456e9b" class="outline-3">
+<h3 id="org2456e9b"><span class="section-number-3">1.6</span> There's special, and then there's special</h3>
 <div class="outline-text-3" id="text-1-6">
 <p>
 Next up the difficulty ladder are variables which are local to a
@@ -983,8 +1455,8 @@ expressions, and they are even more complex and subtle.
 </p>
 </div>
 </div>
-<div id="outline-container-org8dd0565" class="outline-3">
-<h3 id="org8dd0565"><span class="section-number-3">1.7</span> &#x2026;and then there's really special</h3>
+<div id="outline-container-orgb74db3a" class="outline-3">
+<h3 id="orgb74db3a"><span class="section-number-3">1.7</span> &#x2026;and then there's really special</h3>
 <div class="outline-text-3" id="text-1-7">
 <p>
 <code>$~</code> is more complex than you might realise. It holds the value of the
@@ -1015,8 +1487,8 @@ unexpectedly change the value of <code>$~</code> that you might be relying on, b
 it is going to make our job implementing it harder.
 </p>
 </div>
-<div id="outline-container-orgce6c220" class="outline-4">
-<h4 id="orgce6c220"><span class="section-number-4">1.7.1</span> Getting and setting the last match</h4>
+<div id="outline-container-org54111fd" class="outline-4">
+<h4 id="org54111fd"><span class="section-number-4">1.7.1</span> Getting and setting the last match</h4>
 <div class="outline-text-4" id="text-1-7-1">
 <p>
 In our core library we need a way to reach up to the caller and set
@@ -1063,8 +1535,8 @@ split the hooks for each call site if they take a binding.
 </p>
 </div>
 </div>
-<div id="outline-container-orga67c9a1" class="outline-4">
-<h4 id="orga67c9a1"><span class="section-number-4">1.7.2</span> Defining <code>$~</code> and setting the last match</h4>
+<div id="outline-container-org870718d" class="outline-4">
+<h4 id="org870718d"><span class="section-number-4">1.7.2</span> Defining <code>$~</code> and setting the last match</h4>
 <div class="outline-text-4" id="text-1-7-2">
 <p>
 With that in place <code>$~</code> can simply be defined as
@@ -1085,8 +1557,8 @@ happening and automatically mark methods to be split.
 </p>
 </div>
 </div>
-<div id="outline-container-org4f00c10" class="outline-4">
-<h4 id="org4f00c10"><span class="section-number-4">1.7.3</span> The other regexp variables</h4>
+<div id="outline-container-org1dc7963" class="outline-4">
+<h4 id="org1dc7963"><span class="section-number-4">1.7.3</span> The other regexp variables</h4>
 <div class="outline-text-4" id="text-1-7-3">
 <p>
 Most of the other variables connected with regular expressions are
@@ -1112,8 +1584,8 @@ the things that makes these variables extra special!
 </div>
 </div>
 </div>
-<div id="outline-container-org290f054" class="outline-3">
-<h3 id="org290f054"><span class="section-number-3">1.8</span> Testing performance</h3>
+<div id="outline-container-orgdafd4d5" class="outline-3">
+<h3 id="orgdafd4d5"><span class="section-number-3">1.8</span> Testing performance</h3>
 <div class="outline-text-3" id="text-1-8">
 <p>
 Let's check global variable reads and hooked variable reads are still
@@ -1243,8 +1715,8 @@ is 3 times slower with hooked variables.
 </p>
 </div>
 </div>
-<div id="outline-container-orgba9e8b0" class="outline-3">
-<h3 id="orgba9e8b0"><span class="section-number-3">1.9</span> What's left?</h3>
+<div id="outline-container-org119c122" class="outline-3">
+<h3 id="org119c122"><span class="section-number-3">1.9</span> What's left?</h3>
 <div class="outline-text-3" id="text-1-9">
 <p>
 After this work there's only two special bits of variable support left
@@ -1277,8 +1749,8 @@ reduced or eliminated, and we migth look at rewriting the storage for
 </p>
 </div>
 </div>
-<div id="outline-container-org1f8b7a0" class="outline-3">
-<h3 id="org1f8b7a0"><span class="section-number-3">1.10</span> Conclusion</h3>
+<div id="outline-container-orgfd1da4f" class="outline-3">
+<h3 id="orgfd1da4f"><span class="section-number-3">1.10</span> Conclusion</h3>
 <div class="outline-text-3" id="text-1-10">
 <p>
 TruffleRuby lets us implement more of Ruby in Ruby itself while still

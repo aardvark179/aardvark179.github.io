@@ -49,53 +49,53 @@
 <h2>Table of Contents</h2>
 <div id="text-table-of-contents">
 <ul>
-<li><a href="#orga579431">1. testing all the parts</a></li>
-<li><a href="#org7ffec4b">2. Work queues and thread pools</a>
+<li><a href="#org906284a">1. testing all the parts</a></li>
+<li><a href="#org8e1daf7">2. Work queues and thread pools</a>
 <ul>
-<li><a href="#org6d812e1">2.1. Condition variables in MRI and TruffleRuby</a></li>
-<li><a href="#orgad8588e">2.2. Checking the performance</a></li>
-<li><a href="#orgf34f1c2">2.3. Reimplementing condition variables</a>
+<li><a href="#org101f05c">2.1. Condition variables in MRI and TruffleRuby</a></li>
+<li><a href="#org96fb63f">2.2. Checking the performance</a></li>
+<li><a href="#org7218e57">2.3. Reimplementing condition variables</a>
 <ul>
-<li><a href="#org96b7575">2.3.1. Interrupts, safepoints, and locks</a></li>
-<li><a href="#org5ec1362">2.3.2. Unpicking the problem</a></li>
-<li><a href="#orgcd02056">2.3.3. Racing condition variables</a></li>
-<li><a href="#orga12a7db">2.3.4. Coordination ni a safepoint</a></li>
+<li><a href="#org4be2f0b">2.3.1. Interrupts, safepoints, and locks</a></li>
+<li><a href="#orgdd3b8b6">2.3.2. Unpicking the problem</a></li>
+<li><a href="#orgd5de279">2.3.3. Racing condition variables</a></li>
+<li><a href="#orgd2b0f2c">2.3.4. Coordination ni a safepoint</a></li>
 </ul>
 </li>
-<li><a href="#org0b1dfc3">2.4. Revised performance results</a></li>
+<li><a href="#org1cbc807">2.4. Revised performance results</a></li>
 </ul>
 </li>
-<li><a href="#orgc169674">3. The request parser</a>
+<li><a href="#org1315e16">3. The request parser</a>
 <ul>
-<li><a href="#org7806395">3.1. the C extension mutex</a></li>
-<li><a href="#org57e37ce">3.2. Native versus managed structs</a></li>
-<li><a href="#org86a24a4">3.3. Optimised code can be hard to optimise</a></li>
+<li><a href="#orgc6096b8">3.1. the C extension mutex</a></li>
+<li><a href="#org87eb6d5">3.2. Native versus managed structs</a></li>
+<li><a href="#orgafd435a">3.3. Optimised code can be hard to optimise</a></li>
 </ul>
 </li>
-<li><a href="#org7307429">4. Revised performance results.</a></li>
+<li><a href="#orgd4b41e7">4. Revised performance results.</a></li>
 </ul>
 </div>
 </div>
 <p>
 <a href="https://github.com/puma/puma">Puma</a> is a Ruby web server commonly used with frameworks such as Rails or Rack, and it's often pretty quick. We got a bug report recently however which said it wasn't nearly as fast on TruffleRuby. Time to dig in and understand why.
 </p>
-<div id="outline-container-orga579431" class="outline-2">
-<h2 id="orga579431"><span class="section-number-2">1</span> testing all the parts</h2>
+<div id="outline-container-org906284a" class="outline-2">
+<h2 id="org906284a"><span class="section-number-2">1</span> testing all the parts</h2>
 <div class="outline-text-2" id="text-1">
 <p>
 I ran a simple test of serving "Hello world" and used Apache Bench to test this, both with one request at a time and with multiple requests concurrently. The results were not encouraging, we were much slower than MRI in both cases, and it was hard to tell where real performance gains needed to be made since the profiles were dominated by mutex operations. Why mutex operations? Well&#x2026;
 </p>
 </div>
 </div>
-<div id="outline-container-org7ffec4b" class="outline-2">
-<h2 id="org7ffec4b"><span class="section-number-2">2</span> Work queues and thread pools</h2>
+<div id="outline-container-org8e1daf7" class="outline-2">
+<h2 id="org8e1daf7"><span class="section-number-2">2</span> Work queues and thread pools</h2>
 <div class="outline-text-2" id="text-2">
 <p>
 Puma uses a thread pool to process its requests, and a work queue to feed tasks to it. This isn't done using a simple <code>SizedQueue</code> but instead uses an array, a mutex and a few condition variables to coordinate the actions of the various threads. So, the throughput of the server is going to partially depend on how well this works.
 </p>
 </div>
-<div id="outline-container-org6d812e1" class="outline-3">
-<h3 id="org6d812e1"><span class="section-number-3">2.1</span> Condition variables in MRI and TruffleRuby</h3>
+<div id="outline-container-org101f05c" class="outline-3">
+<h3 id="org101f05c"><span class="section-number-3">2.1</span> Condition variables in MRI and TruffleRuby</h3>
 <div class="outline-text-3" id="text-2-1">
 <p>
 Condition variables are something a lot of Java programmers will have used without even realising it. In Java you can do
@@ -179,16 +179,16 @@ This works, apart from some subtle edge cases we'll talk about later, but it doe
 </p>
 </div>
 </div>
-<div id="outline-container-orgad8588e" class="outline-3">
-<h3 id="orgad8588e"><span class="section-number-3">2.2</span> Checking the performance</h3>
+<div id="outline-container-org96fb63f" class="outline-3">
+<h3 id="org96fb63f"><span class="section-number-3">2.2</span> Checking the performance</h3>
 <div class="outline-text-3" id="text-2-2">
 <p>
 I wrote a little bench mark that used Puma's thread pool to process a million trivial jobs (and I really do mean trivial, they did no work at all and simply returned nil). I ran this twenty times to ensure all JIT compilation had been done, and another twenty to for the results, and did this for thread pools of 1 to 16 threads. You can see the results below. We're a lot slower than MRI, what can we do to fix that? Well, we might note that each wait operation involves six mutex operations and that reducing this might help. We're also adding and deleting a lot of elements from the hash table of waiters.
 </p>
 </div>
 </div>
-<div id="outline-container-orgf34f1c2" class="outline-3">
-<h3 id="orgf34f1c2"><span class="section-number-3">2.3</span> Reimplementing condition variables</h3>
+<div id="outline-container-org7218e57" class="outline-3">
+<h3 id="org7218e57"><span class="section-number-3">2.3</span> Reimplementing condition variables</h3>
 <div class="outline-text-3" id="text-2-3">
 <p>
 So what's the best we could do? Well we might note that condition variables in Ruby are flexible, but that flexibility is rarely exploited, so we could probably just use a Java condition variable derived from the <code>java.util.concurrent.ReentrantLock</code> associated  with the mutex. That would greatly reduce our locking/unlocking operations. Could that work?
@@ -198,8 +198,8 @@ So what's the best we could do? Well we might note that condition variables in R
 Well a quick prototype showed it was much faster, but it was often impossible to terminate a running session cleanly. What was going wrong?
 </p>
 </div>
-<div id="outline-container-org96b7575" class="outline-4">
-<h4 id="org96b7575"><span class="section-number-4">2.3.1</span> Interrupts, safepoints, and locks</h4>
+<div id="outline-container-org4be2f0b" class="outline-4">
+<h4 id="org4be2f0b"><span class="section-number-4">2.3.1</span> Interrupts, safepoints, and locks</h4>
 <div class="outline-text-4" id="text-2-3-1">
 <p>
 It's quite common in language implementations, or in VMs, to have an idea of safe points. Moments where all threads are asked to pause their execution so that some coordinated task can be performed. Sometimes this only requires that each thread stop individually, but it may require that every thread stops at the same time, and waits until every thread has performed the requested action before continuing.
@@ -218,8 +218,8 @@ If the thread is in some sort of system call then it will be interrupted, and we
 </p>
 </div>
 </div>
-<div id="outline-container-org5ec1362" class="outline-4">
-<h4 id="org5ec1362"><span class="section-number-4">2.3.2</span> Unpicking the problem</h4>
+<div id="outline-container-orgdd3b8b6" class="outline-4">
+<h4 id="orgdd3b8b6"><span class="section-number-4">2.3.2</span> Unpicking the problem</h4>
 <div class="outline-text-4" id="text-2-3-2">
 <p>
 So could we allow threads to be interrupted during a wait operation and not reclaim the lock? Sure we could, but it would require us to implement our own locks from the ground up, with some rather tricky semantics. It's doable, but I'd really rather not.
@@ -267,8 +267,8 @@ Well&#x2026; actually we need to handle safepoints so we'll have to change that 
 </p>
 </div>
 </div>
-<div id="outline-container-orgcd02056" class="outline-4">
-<h4 id="orgcd02056"><span class="section-number-4">2.3.3</span> Racing condition variables</h4>
+<div id="outline-container-orgd5de279" class="outline-4">
+<h4 id="orgd5de279"><span class="section-number-4">2.3.3</span> Racing condition variables</h4>
 <div class="outline-text-4" id="text-2-3-3">
 <p>
 When a safepoint has been executed then all the threads can continue execution, so everything that was waiting for a condition variable will reclaim the lock as fast as possible, and start waiting which will release the lock and allow one of the other threads to do the same thing. But there might be a thread which is going to signal the others, and maybe it restarts its execution and calls signal before any of the waiters has managed to resume. Now we've lost a signal, and our work queue may be stuck forever.
@@ -289,8 +289,8 @@ This breaks the common intuition we have that locks should always be released in
 </p>
 </div>
 </div>
-<div id="outline-container-orga12a7db" class="outline-4">
-<h4 id="orga12a7db"><span class="section-number-4">2.3.4</span> Coordination ni a safepoint</h4>
+<div id="outline-container-orgd2b0f2c" class="outline-4">
+<h4 id="orgd2b0f2c"><span class="section-number-4">2.3.4</span> Coordination ni a safepoint</h4>
 <div class="outline-text-4" id="text-2-3-4">
 <p>
 Safepoints internally use a phaser to synchronise the steps. A phaser allows a number of threads to coordinate their actions by advancing to the next step and optionally waiting for all the other threads to have done the same.
@@ -306,8 +306,8 @@ To unpick our locking problem we need to refine this model slightly. Threads wil
 </div>
 </div>
 </div>
-<div id="outline-container-org0b1dfc3" class="outline-3">
-<h3 id="org0b1dfc3"><span class="section-number-3">2.4</span> Revised performance results</h3>
+<div id="outline-container-org1cbc807" class="outline-3">
+<h3 id="org1cbc807"><span class="section-number-3">2.4</span> Revised performance results</h3>
 <div class="outline-text-3" id="text-2-4">
 <p>
 So we didn't manage to simplify things quite as much as we wanted, and there's a few more minor complications I won't go into around interrupting threads while they try to reacquire the mutex lock, but are we looking better performance wise?
@@ -323,8 +323,8 @@ Time to test the next part of the system and see how that compares.
 </div>
 </div>
 </div>
-<div id="outline-container-orgc169674" class="outline-2">
-<h2 id="orgc169674"><span class="section-number-2">3</span> The request parser</h2>
+<div id="outline-container-org1315e16" class="outline-2">
+<h2 id="org1315e16"><span class="section-number-2">3</span> The request parser</h2>
 <div class="outline-text-2" id="text-3">
 <p>
 Puma uses a C extension to parse the incoming http request. We can run C extensions in TruffleRuby through Sulong (an LLVM bitcode interpreter written using the Truffle framework), and they go through the JIT in just the same way that Ruby code does. This can make them extremely fast, especially when they do relatively small tasks, but sometimes they need patching, or have interactions with native libraries that can cause a problem.  We've already got patches for Puma's extension because it stores a couple of Ruby objects in a structure allocated in native memory. Again, let's check the performance of this in isolation and see how we're doing.
@@ -338,16 +338,16 @@ The test will parse ten thousand headers (actually the same header every time) i
 That's not good, and it probably accounts for a lot of the reason we're slower, but there's a couple of things we cna do to try and speed this up.
 </p>
 </div>
-<div id="outline-container-org7806395" class="outline-3">
-<h3 id="org7806395"><span class="section-number-3">3.1</span> the C extension mutex</h3>
+<div id="outline-container-orgc6096b8" class="outline-3">
+<h3 id="orgc6096b8"><span class="section-number-3">3.1</span> the C extension mutex</h3>
 <div class="outline-text-3" id="text-3-1">
 <p>
 We know that not all C extensions can support multiple concurrent threads, so we normally use a mutex to ensure only one can be run at a time. This can't be a ismple lock unlock operation though as mutexes in Ruby are not reentrant - so we need to check if we own it first. This only adds a little overhead but we can disable it with a command line option.
 </p>
 </div>
 </div>
-<div id="outline-container-org57e37ce" class="outline-3">
-<h3 id="org57e37ce"><span class="section-number-3">3.2</span> Native versus managed structs</h3>
+<div id="outline-container-org87eb6d5" class="outline-3">
+<h3 id="org87eb6d5"><span class="section-number-3">3.2</span> Native versus managed structs</h3>
 <div class="outline-text-3" id="text-3-2">
 <p>
 LEt's take a look at the struct being used to hold the parser state. It starts with a set of integers for various positions within the string being parsed, has two values representing the hash table for the request headers and the body (if any), and then has a whole set of call backs for populating the hash table with the results of parsing the data. Now, all those callbacks are interpreted code in Sulong, but they need to stored as function pointers in a native structure, so they will have to be turned into closures that can be called.
@@ -366,8 +366,8 @@ Well, that's etter but we're still a long way off. Let's try stubbing out the Ru
 </p>
 </div>
 </div>
-<div id="outline-container-org86a24a4" class="outline-3">
-<h3 id="org86a24a4"><span class="section-number-3">3.3</span> Optimised code can be hard to optimise</h3>
+<div id="outline-container-orgafd435a" class="outline-3">
+<h3 id="orgafd435a"><span class="section-number-3">3.3</span> Optimised code can be hard to optimise</h3>
 <div class="outline-text-3" id="text-3-3">
 <p>
 So what's going wrong here? Well the parser isn't hand written, it's a rather large method consisting of a complex set of switch statements and gotos generated by Ragel from a much higher level description of the parser. Parser generators are very useful bits programs, not least because they can often target multiple targets. Puma already targets C and JAva (for its JRuby extension).
@@ -391,8 +391,8 @@ Okay, now let's go back to running the full  Puma tests and see where these chan
 </div>
 </div>
 </div>
-<div id="outline-container-org7307429" class="outline-2">
-<h2 id="org7307429"><span class="section-number-2">4</span> Revised performance results.</h2>
+<div id="outline-container-orgd4b41e7" class="outline-2">
+<h2 id="orgd4b41e7"><span class="section-number-2">4</span> Revised performance results.</h2>
 <div class="outline-text-2" id="text-4">
 <p>
 So, we're not quite as fast with a sinle concurrent request, but we're now better than MRI when running concurrent requests. I'll try to dig into that a little more on a larger multicore machine.
