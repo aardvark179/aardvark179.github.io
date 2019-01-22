@@ -49,16 +49,16 @@
 <h2>Table of Contents</h2>
 <div id="text-table-of-contents">
 <ul>
-<li><a href="#org04c0d89">1. Sorting arrays</a></li>
-<li><a href="#orgbb11fbf">2. WeakRef</a></li>
-<li><a href="#orgfc84ae5">3. The result of operator assignment</a></li>
-<li><a href="#org4e0b66f">4. Prepended modules and constants</a></li>
-<li><a href="#orged0365b">5. Refined modules, <code>Kernel#send</code>, and <code>Symbol#to_proc</code></a></li>
-<li><a href="#orgfc16c35">6. <code>Module#const_get</code> and autoloading</a></li>
-<li><a href="#org4bb7c3b">7. <code>Array#reject!</code> and throwing errors</a></li>
-<li><a href="#orgcc1554f">8. String duplication and mutation</a></li>
-<li><a href="#org7ff71fd">9. Too little time</a></li>
-<li><a href="#org9ad2177">10. String encoding</a></li>
+<li><a href="#orgd9160be">1. Sorting arrays</a></li>
+<li><a href="#orgd07c40b">2. WeakRef</a></li>
+<li><a href="#orgd96b005">3. The result of operator assignment</a></li>
+<li><a href="#org4b8b60f">4. Prepended modules and constants</a></li>
+<li><a href="#orgb9fb73d">5. Refined modules, <code>Kernel#send</code>, and <code>Symbol#to_proc</code></a></li>
+<li><a href="#orgc630e20">6. <code>Module#const_get</code> and autoloading</a></li>
+<li><a href="#orgfb138c6">7. <code>Array#reject!</code> and throwing errors</a></li>
+<li><a href="#orge286319">8. String duplication and mutation</a></li>
+<li><a href="#org6c4fe9a">9. Too little time</a></li>
+<li><a href="#orgaac0f52">10. String encoding</a></li>
 </ul>
 </div>
 </div>
@@ -74,8 +74,8 @@ you need to compare multiple Ruby implementations it's usually easier
 to use classic <code>printf</code> debugging and compare the results. Let's take a
 look at what we found and managed to fix.
 </p>
-<div id="outline-container-org04c0d89" class="outline-2">
-<h2 id="org04c0d89"><span class="section-number-2">1</span> Sorting arrays</h2>
+<div id="outline-container-orgd9160be" class="outline-2">
+<h2 id="orgd9160be"><span class="section-number-2">1</span> Sorting arrays</h2>
 <div class="outline-text-2" id="text-1">
 <p>
 The first bug we found was caused by a test of array sorting. Ruby
@@ -107,8 +107,8 @@ even updating their standard libraries.
 </p>
 </div>
 </div>
-<div id="outline-container-orgbb11fbf" class="outline-2">
-<h2 id="orgbb11fbf"><span class="section-number-2">2</span> WeakRef</h2>
+<div id="outline-container-orgd07c40b" class="outline-2">
+<h2 id="orgd07c40b"><span class="section-number-2">2</span> WeakRef</h2>
 <div class="outline-text-2" id="text-2">
 <p>
 <code>WeakRef</code> is the sort of class that always has some sort of tight
@@ -165,8 +165,8 @@ more of our implementation to Ruby.
 </p>
 </div>
 </div>
-<div id="outline-container-orgfc84ae5" class="outline-2">
-<h2 id="orgfc84ae5"><span class="section-number-2">3</span> The result of operator assignment</h2>
+<div id="outline-container-orgd96b005" class="outline-2">
+<h2 id="orgd96b005"><span class="section-number-2">3</span> The result of operator assignment</h2>
 <div class="outline-text-2" id="text-3">
 <p>
 The next problem we found was the result of operator assignments. Many
@@ -202,8 +202,8 @@ LRU cache class in <code>HexaPDF</code>. It's good to have found this one.
 </p>
 </div>
 </div>
-<div id="outline-container-org4e0b66f" class="outline-2">
-<h2 id="org4e0b66f"><span class="section-number-2">4</span> Prepended modules and constants</h2>
+<div id="outline-container-org4b8b60f" class="outline-2">
+<h2 id="org4b8b60f"><span class="section-number-2">4</span> Prepended modules and constants</h2>
 <div class="outline-text-2" id="text-4">
 <p>
 Inheritance in Ruby can be bit complex, but it can be flattened down
@@ -222,8 +222,8 @@ should work correctly.
 </p>
 </div>
 </div>
-<div id="outline-container-orged0365b" class="outline-2">
-<h2 id="orged0365b"><span class="section-number-2">5</span> Refined modules, <code>Kernel#send</code>, and <code>Symbol#to_proc</code></h2>
+<div id="outline-container-orgb9fb73d" class="outline-2">
+<h2 id="orgb9fb73d"><span class="section-number-2">5</span> Refined modules, <code>Kernel#send</code>, and <code>Symbol#to_proc</code></h2>
 <div class="outline-text-2" id="text-5">
 <p>
 Refined modules are another complex area of Ruby to get right, and
@@ -237,8 +237,8 @@ similar way, so we fixed that at the same time.
 </p>
 </div>
 </div>
-<div id="outline-container-orgfc16c35" class="outline-2">
-<h2 id="orgfc16c35"><span class="section-number-2">6</span> <code>Module#const_get</code> and autoloading</h2>
+<div id="outline-container-orgc630e20" class="outline-2">
+<h2 id="orgc630e20"><span class="section-number-2">6</span> <code>Module#const_get</code> and autoloading</h2>
 <div class="outline-text-2" id="text-6">
 <p>
 TO finish off our little trilogy of complex Ruby features we hadn't
@@ -254,8 +254,8 @@ the simple cases in our core.
 </p>
 </div>
 </div>
-<div id="outline-container-org4bb7c3b" class="outline-2">
-<h2 id="org4bb7c3b"><span class="section-number-2">7</span> <code>Array#reject!</code> and throwing errors</h2>
+<div id="outline-container-orgfb138c6" class="outline-2">
+<h2 id="orgfb138c6"><span class="section-number-2">7</span> <code>Array#reject!</code> and throwing errors</h2>
 <div class="outline-text-2" id="text-7">
 <p>
 <code>Array#rejects!</code> calls a block with each element of the array, and
@@ -305,8 +305,8 @@ might revisit in the future.
 </p>
 </div>
 </div>
-<div id="outline-container-orgcc1554f" class="outline-2">
-<h2 id="orgcc1554f"><span class="section-number-2">8</span> String duplication and mutation</h2>
+<div id="outline-container-orge286319" class="outline-2">
+<h2 id="orge286319"><span class="section-number-2">8</span> String duplication and mutation</h2>
 <div class="outline-text-2" id="text-8">
 <p>
 Strings in many languages are immutable, but this isn't true in
@@ -325,8 +325,8 @@ well.
 </p>
 </div>
 </div>
-<div id="outline-container-org7ff71fd" class="outline-2">
-<h2 id="org7ff71fd"><span class="section-number-2">9</span> Too little time</h2>
+<div id="outline-container-org6c4fe9a" class="outline-2">
+<h2 id="org6c4fe9a"><span class="section-number-2">9</span> Too little time</h2>
 <div class="outline-text-2" id="text-9">
 <p>
 Why would time be an issue with processing PDFs? Well, a PDF file can
@@ -353,8 +353,8 @@ the time to be a <code>Rational</code> or a <code>BigDecimal</code>
 </p>
 </div>
 </div>
-<div id="outline-container-org9ad2177" class="outline-2">
-<h2 id="org9ad2177"><span class="section-number-2">10</span> String encoding</h2>
+<div id="outline-container-orgaac0f52" class="outline-2">
+<h2 id="orgaac0f52"><span class="section-number-2">10</span> String encoding</h2>
 </div>
 
     </div>

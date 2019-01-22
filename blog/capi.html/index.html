@@ -1,0 +1,522 @@
+<!DOCTYPE html>
+<html lang="en-us">
+<head>
+  <title>Better support for C extensions in TruffleRuby. - aardvark179.github.io</title>
+  <meta charset="utf-8" />
+  <meta name="author" content="" />
+
+  <link rel="alternate" title="RSS Feed" href="/rss.xml" type="application/rss+xml">
+  <link rel="stylesheet" href="/media/css/main.css" type="text/css">
+  <link rel="stylesheet" href="/media/css/posts.css" type="text/css">
+
+  <script src="https://ajax.googleapis.com/ajax/libs/jquery/1.11.0/jquery.min.js"></script>
+  <script src="http://netdna.bootstrapcdn.com/bootstrap/3.1.1/js/bootstrap.min.js"></script>
+</head>
+
+  <body class="container">
+<header id="header">
+    <body>
+        <nav class="navbar navbar-default navbar-fixed-top" style="opacity: .9" role="navigation">
+            <div class="container-fluid">
+                <div class="navbar-header">
+                    <button type="button" class="navbar-toggle" data-toggle="collapse" data-target="#bs-example-navbar-collapse-1">
+                        <span class="sr-only">Toggle navigation</span>
+                        <span class="icon-bar"></span>
+                        <span class="icon-bar"></span>
+                        <span class="icon-bar"></span>
+                    </button>
+                    <a class="navbar-brand" href="/">aardvark179.github.io</a>
+                </div>
+                <div class="collapse navbar-collapse" id="bs-example-navbar-collapse-1">
+                    <ul class="nav navbar-nav navbar-right">
+                            <li class="active"><a href="/blog/">Blog</a></li>
+                        <li><a href="/tags/">Tags</a></li>
+                        <li><a href="/about/">About</a></li>
+                        <li><a href="https://github.com/aardvark179">GitHub</a></li>
+                        <li><a href="/rss.xml">RSS</a></li>
+                    </ul>
+                </div>
+            </div>
+        </nav>
+    </body>
+</header>
+
+<section id="content" role="main">
+    <div id="outline-container-sec-" class="row" style="padding-top: 70px">
+        <div class="col-md-2"></div>
+            <h1>Better support for C extensions in TruffleRuby.</h1>
+            <div id="table-of-contents">
+<h2>Table of Contents</h2>
+<div id="text-table-of-contents">
+<ul>
+<li><a href="#orge380b43">1. Interactions between Truffle languages</a></li>
+<li><a href="#org1d6d517">2. C extensions the old way</a>
+<ul>
+<li><a href="#org89df809">2.1. Managed memory</a></li>
+<li><a href="#org5a3ab62">2.2. Handles everywhere</a></li>
+</ul>
+</li>
+<li><a href="#org01ffce3">3. Difficult issues with our old approach</a></li>
+<li><a href="#org9edfd74">4. C extensions the new way</a>
+<ul>
+<li><a href="#orgc370cd7">4.1. Wrapping and unwrapping</a></li>
+<li><a href="#org75ee5bb">4.2. Tidying up wrappers</a></li>
+<li><a href="#org2c61b9c">4.3. Keeping objects alive in MRI</a></li>
+<li><a href="#orge4860e9">4.4. Periodic marking</a></li>
+</ul>
+</li>
+<li><a href="#org0b58325">5. Testing the new approach and what's next?</a>
+<ul>
+<li><a href="#org4b2e10c">5.1. Compatibility</a>
+<ul>
+<li><a href="#org6a4ab61">5.1.1. The type of <code>VALUE</code></a></li>
+<li><a href="#orgfc0b9bb">5.1.2. <code>RARRAY_PTR</code></a></li>
+<li><a href="#org5f72aeb">5.1.3. Calling functions with the wrong arguments</a></li>
+</ul>
+</li>
+<li><a href="#org70b60e1">5.2. Performance</a></li>
+<li><a href="#orgb9a3ba3">5.3. What's next?</a></li>
+</ul>
+</li>
+<li><a href="#org33c9d0b">6. Conclusion</a></li>
+</ul>
+</div>
+</div>
+<p>
+We think it is crucial that any alternative Ruby implementation aiming
+to be fully compatible with MRI runs the C extensions. TruffleRuby's
+compatibility was recently significantly improved, with much better
+support that almost completely removes the need to patch C extensions.
+</p>
+
+<p>
+We've been able to support C extensions in TruffleRuby for a long time
+now, but we've always had to patch them while building the C for them
+to work. We've just added much better support which almost completely
+removes the need to patch extensions. In this article I'll explain how
+Truffle based languages can support polyglot calls, how C extensions
+used to work in TruffleRuby, how they now work, and what the remaining
+differences are with MRI.
+</p>
+<div id="outline-container-orge380b43" class="outline-2">
+<h2 id="orge380b43"><span class="section-number-2">1</span> Interactions between Truffle languages</h2>
+<div class="outline-text-2" id="text-1">
+<p>
+All Truffle languages can provide support for other languages to
+access data and make calls by defining how foreign access is
+resolved. This covers things like asking if an object is executable,
+or has a size, reading and writing public accessible fields, and so
+forth. So JavaScript can easily call methods on a Ruby object, or
+access members of a Ruby array as long as we provide foreign access
+for Ruby objects.
+</p>
+
+<p>
+There is also support for lower level concepts in the foreign access
+APIs.  You can convert an object to a native representation, as well
+as checking whether that object can behave like a pointer.
+</p>
+
+<p>
+These facilities don't cover everything though, so Sulong provides a
+set of functions for converting almost any object into a native handle
+and back again. I say almost any object because boxed primitives such
+as <code>java.lang.Integer</code> are not supported, but you can always arrange
+to wrap these in an object that is supported (and unwrap them again
+when converting back from handles) to avoid the problem.
+</p>
+</div>
+</div>
+<div id="outline-container-org1d6d517" class="outline-2">
+<h2 id="org1d6d517"><span class="section-number-2">2</span> C extensions the old way</h2>
+<div class="outline-text-2" id="text-2">
+<p>
+We used Truffle's polyglot features to call C functions from Ruby, and
+Ruby methods from C, without touching the arguments at all. This
+allowed Ruby objects to pass easily through C code that is interpreted
+by Sulong, but fails if those objects have to be passed to a native
+shared library or stored on the native heap. To solve that problem we
+would patch C extensions in two ways.
+</p>
+</div>
+<div id="outline-container-org89df809" class="outline-3">
+<h3 id="org89df809"><span class="section-number-3">2.1</span> Managed memory</h3>
+<div class="outline-text-3" id="text-2-1">
+<p>
+The first way to avoid problems with the translation of Ruby objects to
+native pointers is to avoid doing as much as possible. By default we'd
+replace every array of <code>VALUE</code> objects (which would be stored on the
+native heap) with a managed object that could store the object without
+conversion. We could also allocate managed structs instead of native
+one, but this became complicated with complex structures which had
+nested members of fused arrays.
+</p>
+</div>
+</div>
+<div id="outline-container-org5a3ab62" class="outline-3">
+<h3 id="org5a3ab62"><span class="section-number-3">2.2</span> Handles everywhere</h3>
+<div class="outline-text-3" id="text-2-2">
+<p>
+The second way to solve these problems was to use the functions Sulong
+provided to convert between managed objects and native handles. These
+functions were hard to use without introducing memory leaks however,
+and did require that we patched every point at which a Ruby object
+needed to be converted to or from native memory.
+</p>
+</div>
+</div>
+</div>
+<div id="outline-container-org01ffce3" class="outline-2">
+<h2 id="org01ffce3"><span class="section-number-2">3</span> Difficult issues with our old approach</h2>
+<div class="outline-text-2" id="text-3">
+<p>
+So, there are a couple of issues with the old approach and resource
+leaks. Let's take a look at the behaviour we would like, the problems
+we could see with the old approach, and what we could do to fix
+those. We'll start by considering a simple case of three objects A, B,
+and C. A will be a GC root (i.e. it's either some sort of global
+object or a variable which the garbage collector knows cannot be
+removed), and B and C are Ruby objects. A will have an instance
+variable of B, and B will have one of C. So A has a hard reference to
+B and B has a hard reference to C like this.
+</p>
+
+<div class="figure">
+<p><object type="image/svg+xml" data="diagram.svg" class="org-svg">
+Sorry, your browser does not support SVG.</object>
+</p>
+</div>
+
+<p>
+We'll use red arrows to indicate hard references from now on, and red
+boxes to indicate GC roots. The good thing here is that if A stops
+being a root, or a hard reference is removed then some or all of the
+objects can be collected.
+</p>
+
+
+<div class="figure">
+<p><object type="image/svg+xml" data="diagram_gc.svg" class="org-svg">
+Sorry, your browser does not support SVG.</object>
+</p>
+</div>
+
+<p>
+Now, what happens when A, B, and C are C structs which have been
+wrapped in Ruby objects? Well, now our hard references are just
+<code>VALUEs</code> in the structs, and for the GC to know those are alive each
+object must mark those it has references to. We'll use purple to mark
+marked links.
+</p>
+
+
+<div class="figure">
+<p><object type="image/svg+xml" data="diagram2.svg" class="org-svg">
+Sorry, your browser does not support SVG.</object>
+</p>
+</div>
+
+<p>
+So in this situation if A stops marking B, or B stops marking C, or A
+ceases to be a GC root then those objects can be collected, just as
+they were above.
+</p>
+
+<p>
+Now what happens in TruffleRuby when we use handles?
+</p>
+
+
+<div class="figure">
+<p><object type="image/svg+xml" data="diagram3.svg" class="org-svg">
+Sorry, your browser does not support SVG.</object>
+</p>
+</div>
+
+<p>
+Now we have a problem. The references from A to B, and B to C are weak
+(they are simple handle numbers) so the handle table has to associate
+those with the objects they represent by keeping a strong
+reference. For B or C to be garbage collected we would need to remove
+the handle pointing to them. Likewise if A ceases to be a root
+something needs to happen for B and C to be collected.
+</p>
+
+<p>
+We might be able to do that with a finaliser for A which in turn
+releases the handle to B, whose finaliser can release the handle to C,
+but the situation may not always be so simple. Consider the following
+structure of objects.
+</p>
+
+
+<div class="figure">
+<p><object type="image/svg+xml" data="diagram4.svg" class="org-svg">
+Sorry, your browser does not support SVG.</object>
+</p>
+</div>
+
+<p>
+This is a common sort of structure to find in tools like XML
+processors. Each node has a reference to the parent document, and to
+its own children. If we break the hard reference from the GC root
+object to the document then it and all of its nodes can be
+collected. The same is true if the nodes hold <code>VALUEs</code> and mark them,
+but what happens if we use handles?
+</p>
+
+
+<div class="figure">
+<p><object type="image/svg+xml" data="diagram5.svg" class="org-svg">
+Sorry, your browser does not support SVG.</object>
+</p>
+</div>
+
+<p>
+Well, our diagram has certainly got messier! But it's also hard to
+know how we should free those objects nicely. Release the handle that
+Object held to Document doesn't help, because other handles exist
+pointing to it from the nodes, so the whole cluster remains
+uncollected. There doesn't seem to be a nice obvious order in which we
+could do it. We could solve almost any situation like this by
+introducing weak handles, but that requires patching each C extension,
+and carefully analysing how to break these cycles. To really be
+compatible we need a different approach.
+</p>
+</div>
+</div>
+<div id="outline-container-org9edfd74" class="outline-2">
+<h2 id="org9edfd74"><span class="section-number-2">4</span> C extensions the new way</h2>
+<div class="outline-text-2" id="text-4">
+<p>
+Our previous approach was enough to get several key C extensions
+working, but sometimes they required large patches, and avoiding
+resource leaks was tricky. We prototyped several approaches, either
+making as many parts as possible managed objects to avoid conversion,
+or allowing all Ruby objects to be converted to native pointers, but
+both these approaches had issues. So we tried a third approach,
+wrapping every Ruby object.
+</p>
+</div>
+<div id="outline-container-orgc370cd7" class="outline-3">
+<h3 id="orgc370cd7"><span class="section-number-3">4.1</span> Wrapping and unwrapping</h3>
+<div class="outline-text-3" id="text-4-1">
+<p>
+The idea is fairly simple. C extensions will never see raw Ruby
+objects, they will only ever see wrappers that know how to convert
+themselves to native pointers, and at every point where a Ruby object
+needs to be extracted from a wrapper we know there should only ever be
+a wrapper or a native pointer. This makes it easy to convert back from
+a native pointer to a wrapper. Best of all C extensions don't have to
+know this is happening, so although it required a lot of changes to
+our C code to wrap and unwrap values that is as far as the changes go.
+</p>
+</div>
+</div>
+<div id="outline-container-org75ee5bb" class="outline-3">
+<h3 id="org75ee5bb"><span class="section-number-3">4.2</span> Tidying up wrappers</h3>
+<div class="outline-text-3" id="text-4-2">
+<p>
+It was also important that these wrappers didn't cause the objects
+they wrapped to live longer than expected. This was a real problem
+with the handle conversion we used to do, and we didn't want to make
+it worse. Wrappers obviously need to keep a strong reference to the
+object they wrap, and objects should also keep a strong reference to
+their wrapper, but converting an object to a native pointer should not
+stop it from getting garbage collected at some point, but equally it
+mustn't be collected too soon.
+</p>
+</div>
+</div>
+<div id="outline-container-org2c61b9c" class="outline-3">
+<h3 id="org2c61b9c"><span class="section-number-3">4.3</span> Keeping objects alive in MRI</h3>
+<div class="outline-text-3" id="text-4-3">
+<p>
+MRI keeps objects alive in two ways when they are being used in a C
+extension. Any object still on the stack will be seen by the GC and
+kept alive, but that isn't enough to preserve values which may have
+been assigned to a field in a structure. MRI allows these to be
+kept alive by associating the structure with a Ruby object, and
+allowing that object to mark other it has references to. So, when the
+garbage collector traverses all the objects in your Ruby heap it calls
+these custom mark functions and the objects will be marked as live as
+long as the owners are. There's just one problem, we don't have a GC
+which can call custom mark functions, we have to work with any GC on
+the JVM. We also can't change the GC to look for native pointers on
+the stack which should also keep their respective objects alive.
+</p>
+</div>
+</div>
+<div id="outline-container-orge4860e9" class="outline-3">
+<h3 id="orge4860e9"><span class="section-number-3">4.4</span> Periodic marking</h3>
+<div class="outline-text-3" id="text-4-4">
+<p>
+We can solve this by keeping two lists of objects that need to be kept
+alive. Then each time we convert a wrapper to a native pointer we will
+add the wrapper to the lists, and it will in turn keep its object
+alive. One list is for those objects with pointers on the stack. We
+can create this list whenever we enter a C extension, and destroy it
+again when we finish the call. The other list is a fixed size buffer
+of every wrapper converted to a pointer. Whenever this list becomes
+full we'll run any marking functions associated with live objects and
+attach lists of marked objects to their owners. Let's see what that
+looks like with the example we've used before (I've left off the stack
+list to keep the diagrams from becoming too cluttered):
+</p>
+
+<div class="figure">
+<p><object type="image/svg+xml" data="marking.svg" class="org-svg">
+Sorry, your browser does not support SVG.</object>
+</p>
+</div>
+
+<p>
+As you can see, since the handle table now only holds weak references
+to objects, once the preservation table has become full and the
+markers have been run there are no strong references from the
+preservation table or the handle table to the actuAl objects. We no
+longer need to write special finalisers for the object we create, as
+long as we ensure the marking functions do not maintain any strong
+references to the objects.
+</p>
+</div>
+</div>
+</div>
+<div id="outline-container-org0b58325" class="outline-2">
+<h2 id="org0b58325"><span class="section-number-2">5</span> Testing the new approach and what's next?</h2>
+<div class="outline-text-2" id="text-5">
+<p>
+I said at the start of this article that we used to have to patch C
+extensions, so how much has our compatibility improved; does this new
+approach perform well or is more work required to make it fast; and
+what are our next steps?
+</p>
+</div>
+<div id="outline-container-org4b2e10c" class="outline-3">
+<h3 id="org4b2e10c"><span class="section-number-3">5.1</span> Compatibility</h3>
+<div class="outline-text-3" id="text-5-1">
+<p>
+<a href="https://github.com/oracle/truffleruby/commit/1915b9a4">130 additions, and 1,402 deletions</a> is the best kind of commit to be
+able to merge. This new approach has allowed us to remove almost
+all our patches for C extensions, even for complex ones such as zlib,
+OpenSSl, or pg.
+</p>
+
+<p>
+Notice we've only removed <i>almost</i> all patches. There are however
+still some fundamental differences between us and MRI, but they are
+much smaller than they were.
+</p>
+</div>
+<div id="outline-container-org6a4ab61" class="outline-4">
+<h4 id="org6a4ab61"><span class="section-number-4">5.1.1</span> The type of <code>VALUE</code></h4>
+<div class="outline-text-4" id="text-5-1-1">
+<p>
+One is that our <code>VALUE</code> type is a <code>void *</code> in C. This means we can't
+do a switch on a <code>VALUE</code>, so we do still need to patch anything that
+tries to do that.
+</p>
+</div>
+</div>
+<div id="outline-container-orgfc0b9bb" class="outline-4">
+<h4 id="orgfc0b9bb"><span class="section-number-4">5.1.2</span> <code>RARRAY_PTR</code></h4>
+<div class="outline-text-4" id="text-5-1-2">
+<p>
+We also can't yet translate a pointer to a Ruby array's contents to
+native. This requires storing the contents in native memory so that
+they can be read and altered from C, but ensuring that the view of the
+array from Ruby remains consistent with any changes made via a C
+extension. The work to support this is in progress and we expect to
+resolve this area of incompatibility very soon.
+</p>
+</div>
+</div>
+<div id="outline-container-org5f72aeb" class="outline-4">
+<h4 id="org5f72aeb"><span class="section-number-4">5.1.3</span> Calling functions with the wrong arguments</h4>
+<div class="outline-text-4" id="text-5-1-3">
+<p>
+There are also some small differences imposed by our use of Sulong to
+interpret C extensions. One is function declarations may need to be
+changed. For example a function declared as taking two arguments must
+be passed two arguments, even if the second one is never used, and
+<code>int</code> and pointer types may not be as interchangeable as they can be
+in native C. We also have trouble with varargs functions in managed
+code being called from native libraries, but none of these differences
+causes widespread problems and most can be patched without changing the
+behaviour of any C extensions.
+</p>
+</div>
+</div>
+</div>
+<div id="outline-container-org70b60e1" class="outline-3">
+<h3 id="org70b60e1"><span class="section-number-3">5.2</span> Performance</h3>
+<div class="outline-text-3" id="text-5-2">
+<p>
+Translating between Ruby objects and native pointers requires updating
+a global hash table, which is relatively expensive. We reduce that
+cost by tagging the pointers for common types, so true, false, nil,
+and so forth always convert to the same native value and never need to
+touch the hash table. Likewise fixnums can be tagged to cover most of
+their range, and we can probably use a similar technique for floating
+point numbers.
+</p>
+
+<p>
+We are also doing work to reduce the costs of our GC marking
+technique. We can make an assumptions that GC marking functions are
+not used and avoid those costs as long as we can safely recover as
+soon as markers are introduced, and we can reduce the cost of
+preserving objects on the stack in many situations.
+</p>
+
+<p>
+Having applied some of these techniques we have benchmarked repeated
+calls to C extensions being up to 3 times faster than MRI 2.4 in some
+cases, though not yet for all our tests. We'll continue to work no
+performance in this area.
+</p>
+</div>
+</div>
+<div id="outline-container-orgb9a3ba3" class="outline-3">
+<h3 id="orgb9a3ba3"><span class="section-number-3">5.3</span> What's next?</h3>
+<div class="outline-text-3" id="text-5-3">
+<p>
+As I mentioned above we're still working on some changes to improve
+compatibility even more, and we'll continue to benchmark and improve
+performance. We expect any remaining problems to be related to
+specific functions in the Ruby C APIs rather than being more
+fundamental compatibility issues, and we'll be expanding our testing
+of gems considerably in the near future to help find and resolve
+these.
+</p>
+</div>
+</div>
+</div>
+<div id="outline-container-org33c9d0b" class="outline-2">
+<h2 id="org33c9d0b"><span class="section-number-2">6</span> Conclusion</h2>
+<div class="outline-text-2" id="text-6">
+<p>
+These changes will be coming out as part of next GraalVM release
+(release candidate 12). If you use or maintain a Ruby C extension then
+now is great time to start testing it with TruffleRuby. Get in touch
+with us via <a href="https://twitter.com/truffleruby?lang=en">twitter</a> or <a href="https://gitter.im/graalvm/truffleruby">Gitter</a>, or report issues via our <a href="https://github.com/oracle/truffleruby">GitHub repo</a>
+</p>
+</div>
+</div>
+
+    </div>
+</section>
+
+
+<footer class="footer">
+    <p>Generated by <a href="http://www.gnu.org/software/emacs/">Emacs</a> 26.x (<a href="http://orgmode.org">Org mode</a> 9.x)</p>
+    <p>
+        Copyright &copy; 2012 - <span id="footerYear"></span> <a href="mailto:duncan &lt;at&gt; duncan-linux"></a>
+        &nbsp;&nbsp;-&nbsp;&nbsp;
+        Powered by <a href="https://github.com/kelvinh/org-page" target="_blank">org-page</a>
+        <script type="text/javascript">document.getElementById("footerYear").innerHTML = (new Date()).getFullYear();</script>
+    </p>
+</footer>
+
+  </body>
+</html>
