@@ -333,9 +333,9 @@ digraph D {
 [[file:diagram4.svg]]
 
 This is a common sort of structure to find in tools like XML
-processors. Each node has a reference to the parent document, and to
-its own children. If we break the hard reference from the GC root
-object to the document then it and all of its nodes can be
+processors such as Nokogiri. Each node has a reference to the parent
+document, and to its own children. If we break the hard reference from
+the GC root object to the document then it and all of its nodes can be
 collected. The same is true if the nodes hold ~VALUEs~ and mark them,
 but what happens if we use handles?
 
@@ -473,9 +473,9 @@ mustn't be collected too soon.
 MRI keeps objects alive in two ways when they are being used in a C
 extension. Any object still on the stack will be seen by the GC and
 kept alive, but that isn't enough to preserve values which may have
-been assigned to a field in a structure. MRI allows these to be
-kept alive by associating the structure with a Ruby object, and
-allowing that object to mark other it has references to. So, when the
+been assigned to a field in a structure. MRI allows these to be kept
+alive by associating the structure with a Ruby object, and allowing
+that object to mark other objects it has references to. So, when the
 garbage collector traverses all the objects in your Ruby heap it calls
 these custom mark functions and the objects will be marked as live as
 long as the owners are. There's just one problem, we don't have a GC
@@ -569,7 +569,7 @@ digraph D {
 As you can see, since the handle table now only holds weak references
 to objects, once the preservation table has become full and the
 markers have been run there are no strong references from the
-preservation table or the handle table to the actuAl objects. We no
+preservation table or the handle table to the actual objects. We no
 longer need to write special finalisers for the object we create, as
 long as we ensure the marking functions do not maintain any strong
 references to the objects.
@@ -582,7 +582,7 @@ what are our next steps?
 [[https://github.com/oracle/truffleruby/commit/1915b9a4][130 additions, and 1,402 deletions]] is the best kind of commit to be
 able to merge. This new approach has allowed us to remove almost
 all our patches for C extensions, even for complex ones such as zlib,
-OpenSSl, or pg.
+OpenSSL, or pg.
 
 Notice we've only removed /almost/ all patches. There are however
 still some fundamental differences between us and MRI, but they are
@@ -618,14 +618,14 @@ their range, and we can probably use a similar technique for floating
 point numbers.
 
 We are also doing work to reduce the costs of our GC marking
-technique. We can make an assumptions that GC marking functions are
+technique. We can make an assumption that GC marking functions are
 not used and avoid those costs as long as we can safely recover as
 soon as markers are introduced, and we can reduce the cost of
 preserving objects on the stack in many situations.
 
 Having applied some of these techniques we have benchmarked repeated
 calls to C extensions being up to 3 times faster than MRI 2.4 in some
-cases, though not yet for all our tests. We'll continue to work no
+cases, though not yet for all our tests. We'll continue to work on
 performance in this area.
 ** What's next?
 As I mentioned above we're still working on some changes to improve
@@ -636,7 +636,7 @@ fundamental compatibility issues, and we'll be expanding our testing
 of gems considerably in the near future to help find and resolve
 these.
 * Conclusion
-These changes will be coming out as part of next GraalVM release
-(release candidate 12). If you use or maintain a Ruby C extension then
-now is great time to start testing it with TruffleRuby. Get in touch
-with us via [[https://twitter.com/truffleruby?lang=en][twitter]] or [[https://gitter.im/graalvm/truffleruby][Gitter]], or report issues via our [[https://github.com/oracle/truffleruby][GitHub repo]]
+These changes part of our new GraalVM release (release candidate
+12). If you use or maintain a Ruby C extension then now is great time
+to start testing it with TruffleRuby. Get in touch with us via [[https://twitter.com/truffleruby?lang=en][twitter]]
+or [[https://gitter.im/graalvm/truffleruby][Gitter]], or report issues via our [[https://github.com/oracle/truffleruby][GitHub repo]]
