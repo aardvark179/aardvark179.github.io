@@ -636,7 +636,7 @@ fundamental compatibility issues, and we'll be expanding our testing
 of gems considerably in the near future to help find and resolve
 these.
 * Conclusion
-These changes part of our new GraalVM release (release candidate
+These changes are part of our new GraalVM release (release candidate
 12). If you use or maintain a Ruby C extension then now is great time
 to start testing it with TruffleRuby. Get in touch with us via [[https://twitter.com/truffleruby?lang=en][twitter]]
 or [[https://gitter.im/graalvm/truffleruby][Gitter]], or report issues via our [[https://github.com/oracle/truffleruby][GitHub repo]]
