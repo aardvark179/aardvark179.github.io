@@ -1,39 +1,192 @@
-In a previous article I've talked about how we changed our C API in TruffleRuby to successfully emulate most aspects of MRI's C extensions. Here I'd like to talk about how we can start to tackle the tricky problems of getting C extensions to run quickly. I'll talk about individual examples but this is likely to be a continuing project as we test more C extensions and try to look for the areas aspects that are causing us the most problems, and find ways to fix those issues.
+In a previous article I've talked about how we changed our C API in
+TruffleRuby to successfully emulate most aspects of MRI's C
+extensions. Here I'd like to talk about how we can start to tackle the
+tricky problems of getting C extensions to run quickly. I'll talk
+about individual examples but this is likely to be a continuing
+project as we test more C extensions and try to look for the areas
+aspects that are causing us the most problems, and find ways to fix
+those issues.
 * Measuring Performance
-The first thing we have to think about is what and how we want to measure performance. There are often a lot of assuptions about how code will perform that inform the way it is benchmarked, so our first task is to see if they actually hold true in our case.
+The first thing we have to think about is what and how we want to
+measure performance. There are often a lot of assuptions about how
+code will perform that inform the way it is benchmarked, so our first
+task is to see if they actually hold true in our case.
 ** Assumptions: do they hold?
-Normally benchmarks of tasks in just in time compiled (JITted) languages are done assuming that there will be an inital warmup phase during which the various parts of the task will be compiled and optimised by the JIT, and after that point there will be a good long period during which performance can be measured either through timing each iteration of measuring the number that can be run in some period of time. The easiest way we have of checking this is to choose our benchmark and time each iteration to see if we reach some steady state. We may also want to record compilation events to confirm that, and potentially diagnose any performance problems that are invalidating optimisations. Lets take a look at a sample benchmark to see if things are working rounghly as we expect.
+Normally benchmarks of tasks in just in time compiled (JITted)
+languages are done assuming that there will be an inital warmup phase
+during which the various parts of the task will be compiled and
+optimised by the JIT, and after that point there will be a good long
+period during which performance can be measured either through timing
+each iteration of measuring the number that can be run in some period
+of time. The easiest way we have of checking this is to choose our
+benchmark and time each iteration to see if we reach some steady
+state. We may also want to record compilation events to confirm that,
+and potentially diagnose any performance problems that are
+invalidating optimisations. Lets take a look at a sample benchmark to
+see if things are working rounghly as we expect.
 ** What should we optimise for?
-There are two things we might decide it's worth optimising for, either peak performance or the time to reach it. Obviously in an ideal world we'd really like both to be as good as possible, but we rarely find ourselves in an ideal world so we're going to prioritise peak performance. If we see things along the way that might help reduce the time to reach it then there's nothing wrong with dealing with those issues, but they aren't going to be our primary goal.
+There are two things we might decide it's worth optimising for, either
+peak performance or the time to reach it. Obviously in an ideal world
+we'd really like both to be as good as possible, but we rarely find
+ourselves in an ideal world so we're going to prioritise peak
+performance. If we see things along the way that might help reduce the
+time to reach it then there's nothing wrong with dealing with those
+issues, but they aren't going to be our primary goal.
 * Profiling code
-  Now we know what we want to achieve, and have some idea that we're going about this the right way we can start to think about finding out where improvements are needed. We could do this by explicitly breaking down our test and timing the individual parts of it, or we could use an existing tool to get information about the time taken and look at the output of that. This is what a profiler is for. Profilers are very useful tools but there are two very important things you need to konw about them.
-  1. They lie
-  2. There are several different types, and they will lie to you in different ways about different things.
+Now we know what we want to achieve, and have some idea that we're
+going about this the right way we can start to think about finding
+out where improvements are needed. We could do this by explicitly
+breaking down our test and timing the individual parts of it, or we
+could use an existing tool to get information about the time taken
+and look at the output of that. This is what a profiler is
+for. Profilers are very useful tools but there are two very
+important things you need to konw about them.
 
-   When I say profilers will lie to you I mean that they will all affect the execution of your code to a greater or lesser extent, and you need to be aware of that when choosing your profiler and looking at the information it is giving you. Let's look at the types of profiler we have available to us
+  1. They lie
+  2. There are several different types, and they will lie to you in
+     different ways about different things.
+
+When I say profilers will lie to you I mean that they will all affect
+the execution of your code to a greater or lesser extent, and you
+need to be aware of that when choosing your profiler and looking at
+the information it is giving you. Let's look at the types of
+profiler we have available to us
 ** Instrumenting
-Instrumenting profilers insert extra instructions into you code to record the entry to and exit from each function or method in your program. This adds a cost to each function call in your program, and the overhead of recording the data may siginifcantely skew where times is spent. This is a technique shared with code coverage tools on the JVM, and is available in tools such as Visual VM, and many higher level profilers which will only instrument things like the end points for requests in wbe frameworks. There's a very fine line between such high level profilers and logging tools.
+Instrumenting profilers insert extra instructions into you code to
+record the entry to and exit from each function or method in your
+program. This adds a cost to each function call in your program, and
+the overhead of recording the data may siginifcantely skew where times
+is spent. This is a technique shared with code coverage tools on the
+JVM, and is available in tools such as Visual VM, and many higher
+level profilers which will only instrument things like the end points
+for requests in wbe frameworks. There's a very fine line between such
+high level profilers and logging tools.
 ** Sampling
-Sampling profilers work by looking at the stack of each thread at regular points in time. Depending on how they are implemented they may have to stop executuion of that thread to sample the stack (which often biases the samples towards particular points in a program execution) or they may inadvertently introduce aliasing errors as they may sample at a frequency which interacts poorly with the timing of tasks in your program. Asynchronous sampling involves another thread or process reading the stack of a thread being profiled, but this takes care to get right and may result in some corrupt stacks being captured if the profiled thread is not paused in some way. There are many sampling profilers for the JVM, and they are normally limited to sampling at safepoints inserted into your code by the VM. If you're using a recent JVM or have an approrpiate licence then you can also use Java Flight Recorder, and the Mission Control fromt end to profile your code. Finally tools such as perf on Linux can be used in combination with some JVM tooling to profile your application, though this technique can only operate on compiled code
+Sampling profilers work by looking at the stack of each thread at
+regular points in time. Depending on how they are implemented they may
+have to stop executuion of that thread to sample the stack (which
+often biases the samples towards particular points in a program
+execution) or they may inadvertently introduce aliasing errors as they
+may sample at a frequency which interacts poorly with the timing of
+tasks in your program. Asynchronous sampling involves another thread
+or process reading the stack of a thread being profiled, but this
+takes care to get right and may result in some corrupt stacks being
+captured if the profiled thread is not paused in some way. There are
+many sampling profilers for the JVM, and they are normally limited to
+sampling at safepoints inserted into your code by the VM. If you're
+using a recent JVM or have an approrpiate licence then you can also
+use Java Flight Recorder, and the Mission Control fromt end to profile
+your code. Finally tools such as perf on Linux can be used in
+combination with some JVM tooling to profile your application, though
+this technique can only operate on compiled code
 ** Hybrid approaches
-There are also smaplers that use a hybrid approach. The executed code can be instrumented in an extremely light way to maintain a shadowstack that may be easily sampled by second thread at regular intervals. This is the approach taken by the sampler in TruffleRuby, and it has some additional options so we can make trade offs between detail of our profiles and the impact of collecting the data on the program's execution.
+There are also smaplers that use a hybrid approach. The executed code
+can be instrumented in an extremely light way to maintain a
+shadowstack that may be easily sampled by second thread at regular
+intervals. This is the approach taken by the sampler in TruffleRuby,
+and it has some additional options so we can make trade offs between
+detail of our profiles and the impact of collecting the data on the
+program's execution.
+* What should we benchmark and profile?
+It's tempting to say, "We should test the things we're /really/
+interested in." That may be Rails, or s epecific Rails application
+like Discourse, and if we're lucky we'll discover that performance is
+just fine and we have no work to do. However if we're not at that
+point then it will be much harder to identify issues, and so much
+harder to fix the underlying problems. Worse, we may not be able to
+measure the effect of individual fixes on a large benchmark even
+though they may help in combination.
+** Starting small and working our way up
+We'll have an easier time finding and fixing our performance issues if
+we start with smaller benchmarks where we can more clearly see the
+performance problems, and where fixing each issue will hopefully have
+a measurable affect on some aspect of performance.
+** Choosing our initial targets
+We;re going to start by looking at ~zlib~ and ~msgpack~. These are
+both used in many Ruby applications, but Zlib is also used by
+~bundler~ so its performance will be one of the first things users of
+TruffleRuby are likely to see.
 * Lies, damned lies, and profiling data
-So, we're going to use the built in TruffleRuby CPU sampler as our profiler, and we'll take a look at a benchmark of Zlib with the no compression setting. I'm using this option because the amount of work done in the native zlib library will be minimal, and the process should be dominated by the Ruby run time calls. So, what sort of trace do we get?
+So, we're going to use the built in TruffleRuby CPU sampler as our
+profiler, and we'll take a look at a benchmark of Zlib with the no
+compression setting. I'm using this option because the amount of work
+done in the native zlib library will be minimal, and the process
+should be dominated by the Ruby run time calls. So, what sort of trace
+do we get?
 
 Trace of zlib performance dominated by rb_block_proc.
 
-We can see this trace is apparently heavily dominated by calls to ~rb_block_proc~, but let's make a quick check that there isn't anything else hiding, and that we can understand why it might dominate so highly.
-** What can't we see in the data?
-One thing you'll notice is that we can't see any native library routines on this trace. Our profiler only understands the shadow stack maintained for Truffle languages, and native calls do not insert entries on that. We might want to change that so we can see how much time is spent in native libraries, but at the time of writing we will have to simply infer the presence of those calls.
 ** What is causing the things we can see?
-If we navigate to the implementation of ~rb_block_proc~ we can see that it even has a note that it needs to be optimized. It has to walk up the stack and find the Ruby frame which represents the call into C, and check the block argument there. This is going to be expensive, and fixing it will involve finding a different way to do the same thing. We'll come back to how we can improve this later.  
+What we see on our profiles are Ruby methods and C functions run by
+Truffle. This trace is apparently heavily dominated by calls to
+~rb_block_proc~. It's always good to think about the things that
+aren't shown in the profile, and whether we can reasonably explain the
+presence of the what is there.
+** What can't we see in the data?
+One thing you'll notice is that we can't see any native library
+routines on this trace. Our profiler only understands the shadow stack
+maintained for Truffle languages, and native calls do not insert
+entries on that. We might want to change that so we can see how much
+time is spent in native libraries, but at the time of writing we will
+have to simply infer the presence of those calls.
 ** Are any of these false positives?
-You should always ask yourself whether the time spent in a method seems plausible, and if it doesn't then why might it show up on the trace unexpectedly.
-* Testing hypotheses and fixing performance issues
-** Can we reproduce these problems in smaller cases?
-** Can we measure the impact?
-** Is this consistent with what we see in our larger profiles?
+You should always ask yourself whether the time spent in a method
+seems plausible, and if it doesn't then why might it show up on the
+trace unexpectedly. The reasons for false positives will vary with the
+type of profiler, and it may take some work to uncover exactly why
+something shows up. In this case ~rb_block_proc~ is showing up so
+prominently that it's either a very strange false positive, or it's
+doing something very expensive which we should be able to spot easily.
 * Looking at the performance of zlib and msgpack
 ** native and interpreted code, cores and wrappers.
 ** Low haning fruit
+If we navigate to the implementation of ~rb_block_proc~ we can see the
+folloowing:
+
+#+BEGIN_SRC java
+    @CoreMethod(names = "rb_block_proc", onSingleton = true)
+    public abstract static class BlockProcNode extends CoreMethodArrayArgumentsNode {
+
+        // TODO (pitr-ch 04-Dec-2017): needs optimising
+        @TruffleBoundary
+        @Specialization
+        public DynamicObject blockProc() {
+            return Truffle.getRuntime().iterateFrames(frameInstance -> {
+                final Node callNode = frameInstance.getCallNode();
+
+                if (callNode != null) {
+                    final RootNode rootNode = callNode.getRootNode();
+                    // Skip Ruby frames in cext.rb file since they are implementing methods which are implemented
+                    // with C in MRI, and therefore are also implicitly skipped when when looking up the block passed
+                    // to a C API function.
+                    if (rootNode instanceof RubyRootNode &&
+                            rootNode.getSourceSection().isAvailable() &&
+                            !rootNode.getSourceSection().getSource().getName().endsWith("truffle/cext.rb")) {
+
+                        final DynamicObject block = RubyArguments.getBlock(frameInstance.getFrame(FrameAccess.READ_ONLY));
+                        return block == null ? nil() : block;
+                    }
+                }
+
+                return null;
+            });
+        }
+
+    }
+#+END_SRC
+
+It even has a note that it needs to be optimized! There are a few
+things worth noting about this. First it has a ~@TruffleBoundary~
+annotation telling our JIT not to try inlining this code. The body of
+the method walks up the stack and finds the Ruby frame which
+represents the call into C, and then fetches the block argument from
+there there. Stack walking operations are often expensive when they
+aren't a fixed depth, so speeding this up will require finding a
+different way to store the block argument at the point we enter C
+functions that can be quickly accessed from C.
+
+Luckily we already have to store some data at those call boundaries
+for our emulation of MRI's ~VALUE~ semantics and GC mark
+functions. Adding the block to this is cheap and will help improve
+performance quite nicely.
 ** Are we optimising for a special case?
