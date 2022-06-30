@@ -105,7 +105,20 @@ a measurable affect on some aspect of performance.
 We;re going to start by looking at ~zlib~ and ~msgpack~. These are
 both used in many Ruby applications, but Zlib is also used by
 ~bundler~ so its performance will be one of the first things users of
-TruffleRuby are likely to see.
+TruffleRuby are likely to see. The first thing to do is an inital
+check that this is an area we should look at.
+
+#+begin_src gnuplot :var mri=../data/zlib/mri/output.org:output-normal TruffleRuby=../data/zlib/baseline/output.org:output-normal :file benchmark1.svg
+set yrange [0:0.5]
+plot mri using 1:2 with lines, TruffleRuby using 1:2 with lines
+
+#+end_src
+
+#+RESULTS:
+[[file:benchmark1.svg]]
+
+We can see that we're considerably slower than MRI, so this looks like
+a good place to start looking.
 * Lies, damned lies, and profiling data
 So, we're going to use the built in TruffleRuby CPU sampler as our
 profiler, and we'll take a look at a benchmark of Zlib with the no
