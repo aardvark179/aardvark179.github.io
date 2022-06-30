@@ -1,0 +1,241 @@
+#+TITLE: Scheduling lighter weight threads in Ruby and Java
+#+DATE: 2018-01-26 Fri
+#+OPTIONS: toc:nil
+
+* Scheduling lighter weight threads in Ruby and Java
+
+Both Java and Ruby are in the process of adding better support for
+light weight threads of execution. In Ruby 3.0 we saw non-blocking
+~Fiber~ schedulers introduced, while over on the Java side the
+~VIrtualThreads~ developed as part of Project Loom are arriving as a
+preview feature in Java 19. Both of these efforts aim to do roughly
+the same thing: make it possible for developers to write simple
+blocking code, but internally be able to run it on objects much more
+lightweight than OS level threads, and with a userland scheduler that
+may allow for better, or faster decision to be made on which thread of
+execution it is sensible to try and resume when another has
+blocked. Despite these similarities they do take quite different
+approaches, and present a somewhat different model to the
+developer. Let's start by taking a step back and looking at some of
+the ways concurrency can be implemented by languages and where Ruby
+and Java fall in that space.
+
+** Stacks, heaps, lifetimes, and function colouring.
+
+Many of the choices a language makes on adding any sort of lightweight
+concurrency are going to be informed by how things work at a low
+level, so let's start by taking a look at some of the things that may
+help or hinder different approaches.
+
+Most programmers should be familiar with the idea of the call stack,
+we certainly see the chain of method calls that led to an error often
+enough when something has gone wrong. Most are also familiar with the
+idea of the heap where most objects live. The two terms help delineate
+the difference between the concepts, with the stack being something
+that is built and torn down in a well understood order, and the heap
+being a less organised mass of things. Internally the stack contains a
+lot more than just the chain of calls. It also holds the local
+variables each function or method has.
+
+*** What's on a stack?
+
+Depending on your language and how it handles memory allocation some
+of those pieces of data may be referred to directly by others. If
+you're coming from a C background you'll know these as pointers, and
+they depend on one very important fact. _The data being pointed to
+will not move to a new address in memory._ A pointer can really point
+to anywhere, so it can be common in a function to declare a local
+variable (which is stored on the stack) and pass a pointer to that
+variable (so, pointing into the stack) to a function you are
+calling. Pointers can also often point to a substructure (maybe a
+field inside a large structure, or an element in an array) so may not
+easily link back to an allocated area of memory or a local
+variable.
+
+Many other languages eschew the idea of pointers and only allow
+references to objects. In many of these languages references can
+only point to the heap, and they are often used in combination with a
+garbage collector that can move objects around on the heap. For this
+to work the GC needs be 'precise'. It must know exactly which things
+on the stack or in the heap are references, and it must be able to
+rewrite those values when it moves an object.
+
+Whatever data is stored on the stack by your language the basic idea
+remains the same. It's an area of memory which we can keep a pointer
+into, and as we make or return from calls we change the value of that
+pointer to work our way up or down the stack. For historical reasons
+stacks in programming languages usually start at the top and grow
+downwards, which can make the use of up and down confusing. Also,
+because the memory used by the stack is part of the same linear
+address space used by everything else in your program it will have a
+limited size, if it grows too large it might overwrite something else
+in your program. To detect this sort of failure a guard page is often
+used. This is a chunk of memory which the processor knows it is
+illegal to write to, so any attempt will cause an error. Although this
+mechanism is cheap it does use memory. Pages are usually 4 kilobytes
+or greater, and although a guard page doesn't need to use 4K or ram it
+will still take up space in our address space.
+
+**** Multiple threads of execution
+
+So the stack is associated with a single thread of execution. When we
+call a function we're pushing something to the stack, and changing the
+stack pointer to mark the new end, and when we return from a function
+we're reverting the value of that stack pointer. If we're going to
+have 2 threads of execution then we're going to need to have two
+stacks, and space for them. Although most operating systems have a way
+to set the maximum stack you have to do that before creating the
+thread, so many languages simply define a standard size. This is often
+a few hundred kilobytes or a few megabytes. If we're going to have
+really large numbers of threads of execution then we're going to use a
+lot of our address space for stacks, or we're going to have to make
+those stacks much smaller, or we need to find another way to handle
+this.
+
+**** Whose stack is it anyway?
+
+Although we've discussed stacks in terms of a single language they are
+also something that crosses the language boundary in interesting
+ways. If you call a C library function from your language (and you
+likely will eventually, or language itself will) then you will either
+end up with a C frame on your stack, or you'll have to maintain two
+separate stacks.
+
+*** What's on a heap?
+
+The heap is where data with a lifetime that may be longer than the
+current function call is stored. In some languages this space is
+allocated as immovable chunks, while in others it may be filled with
+objects that can be moved around by the garbage collector as
+needed. There are different costs to the two approaches as allocation
+when using a moving garbage collector is often extremely cheap, but
+there are over heads incurred by having to run the collector.
+
+*** Immutability and object lifetimes
+
+As mentioned before whether data can be stored on the stack or must be
+placed on the heap or can be stores on the stack depends on its
+lifetime. Something that only lives for the duration of a function
+call may be stored on the stack, while anything that will outlive a
+function call must be stored on the heap. Some languages require you
+to the decision of where to store object manually, some will simply
+store everything on the heap, and some will make the decision for you
+but require you to explicitly state object lifetimes.
+
+*** Function colouring
+
+There's one final language implementation decision that is going to be
+important when thinking concurrency, and that's function colouring, or
+rather whether you're happy to allow it. Function colouring comes in
+many forms, but let's take an example in Java:
+
+#+BEGIN_SRC java
+
+  public int blueFunction() {
+      // Does something.
+      return 1;
+  }
+
+  public int redFunction() throws IOException {
+      // Do things, and maybe throw an exception
+      return 1;
+  }
+#+END_SRC
+
+For ~blueFunction~ in this example to call ~redFunction~ it would need
+to wrap it in some sort of exception handling block. In this example
+~redFunction~ can quite happily call ~blueFunction~, but for other
+colouring two colours may be much more strongly separated.
+
+** Making large numbers of stacks
+
+Now we've got that bit of background we can look at how we might
+create vast numbers of threads of execution without having to create
+vast numbers of fixed sized stacks.
+
+*** Segmented stacks
+
+One option would be to allocate small sections of stack on the
+heap. These segments will need to be chained together in some way, and
+we'll need a new mechanism to detect when a new stack segment is
+required because we probably don't want to use a guard page with
+/every/ stack segment. If we still have code that uses a normal stack
+then this sort of segmented stack may need to be started in a special
+way. Also, because this sort of stack is a little different to the
+standard stack used by other languages, it may not be possible to call
+out to other languages without using the main stack. In other words
+we've introduced function colouring.
+
+*** Dividing up a single stack
+
+If you have a really smart compiler, and the right situation, you may
+be able to analyse the your program well enough to avoid allocating
+stack segments on the heap. If you can statically determine the stack
+segments that will be needed, and you know those are the only stack
+segments that can be created from a function, and that the function
+will not exit until all those stack segments are no longer used, then
+you can just use space on the main stack.
+
+*** Copying the stack
+
+*** Lifetimes and other constraints.
+** Ruby: expanding the role of ~Fiber~ objects
+Ruby has had ~Fiber~ objects since 1.9. Fibers belong to a thread, and
+can only run on that single OS thread. Control could be switched
+between fibers in two ways: either by resuming a fiber, and it
+subsequently yield control back using ~Fiber#resume~ and
+~Fiber::yield~, or through the explicit transfer of control to another
+fiber through ~Fiber#transfer~. At a low level the Ruby VM maintains
+an array of stacks for all the fibers associated with a thread, and
+the transfer between fibers consists of saving all the information
+related to a fiber, and finally at a very low level saving the
+registers, stack pointer, and other data, swapping in the new fibers
+data, and returning (which, because we've fiddled with the stack will
+be to the pointer in the new fiber where it yielded control). Fiber
+scheduling builds on this foundation by establishing a set of
+scheduling hooks that may be called when blocking operation (such as
+claiming a lock) would be performed, the scheduler hook is then able
+to do some work, and possibly yield control from that fiber. For this
+to work the root fiber of the thread needs to the one running the
+scheduler, so we can think of _every_ Ruby thread as essentially
+running
+#+BEGIN_SRC ruby
+  Thread.new do
+  # Run the normal code
+  ensure
+    # Run the scheduler.
+    Fiber.scheduler.close if Fiber.scheduler
+  end
+#+END_SRC
+Where the ~close~ method on the scheduler, slightly counter
+intuitively will be responsible for running any event loop. Since
+threads aren't created with a scheduler by default, and it is possible
+to change the scheduler associated with a thread, the ~close~ method
+is also called if a scheduler is ever removed from a thread, hence
+allowing it to resume any fibers which may be blocked.
+
+The scheduler must do a lot of the work of determining which fibers
+can be run when a hook is called. There are hooks to tell a fiber that
+a lock /might/ now be available, or a queue /might/ have space, but
+for things like IO it's up to the scheduler to work out what might now
+be reable or writeable, and if other parts of the system library are
+made non blocking then it must be done either as new optional
+scheduler hooks, or using the existing block and unblock hooks.
+
+Also, although schedulers are application or library code, they do
+need to be written extremely carefully. The scheduler is responsible
+for unblocking a fiber after a timeout, but must also han potential
+race between the time out and the resource actually becomiing
+unblocked.
+** Adding lighter weight threads to the JVM
+Project Loom has taken a quite different approach to adding lighter
+weight concurrency. Virtual threads behave in most respects exactly
+like normal ~java.lang.Thread~ objects that developers are used to,
+but rather than each virtual thread running on OS thread they are
+mounted and unmounted on carrier threads by a scheduler. They lack the
+inbuilt association that Ruby has between a single OS thread and its
+fibers, with this sort of structured element of concurrency being
+established at a higher level. Not being associated with a single OS
+thread also means there is no array of stacks owned by that thread
+which could be used by the virtual threads. Instead virtual threads
+have their stack copied to an object on the heap
